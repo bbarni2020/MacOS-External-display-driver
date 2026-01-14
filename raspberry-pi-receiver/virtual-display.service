@@ -1,0 +1,16 @@
+[Unit]
+Description=Virtual Display Receiver
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/virtual-display
+ExecStart=/usr/bin/python3 /home/pi/virtual-display/receiver.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
