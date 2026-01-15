@@ -235,9 +235,7 @@ class VideoReceiver:
                 }}
                 
                 const reader = response.body.getReader();
-                const decoder = new TextDecoder();
                 let buffer = new Uint8Array();
-                let jpegStart = null;
                 
                 while (true) {{
                     const {{ done, value }} = await reader.read();
@@ -248,22 +246,20 @@ class VideoReceiver:
                     chunk.set(value, buffer.length);
                     buffer = chunk;
                     
-                    let pos = 0;
-                    while (pos < buffer.length - 1) {{
-                        if (buffer[pos] === 0xFF && buffer[pos + 1] === 0xD8) {{
-                            jpegStart = pos;
+                    while (buffer.length >= 4) {{
+                        const view = new DataView(buffer.buffer, buffer.byteOffset, 4);
+                        const frameSize = view.getUint32(0, false);
+                        
+                        if (buffer.length < frameSize + 4) {{
+                            break;
                         }}
-                        if (jpegStart !== null && buffer[pos] === 0xFF && buffer[pos + 1] === 0xD9) {{
-                            const jpegData = buffer.slice(jpegStart, pos + 2);
-                            const blob = new Blob([jpegData], {{ type: 'image/jpeg' }});
-                            const url = URL.createObjectURL(blob);
-                            frame.src = url;
-                            buffer = buffer.slice(pos + 2);
-                            jpegStart = null;
-                            pos = 0;
-                            continue;
-                        }}
-                        pos++;
+                        
+                        const frameData = buffer.slice(4, frameSize + 4);
+                        const blob = new Blob([frameData], {{ type: 'image/jpeg' }});
+                        const url = URL.createObjectURL(blob);
+                        frame.src = url;
+                        
+                        buffer = buffer.slice(frameSize + 4);
                     }}
                 }}
                 
@@ -323,14 +319,34 @@ class VideoReceiver:
             return False
     
     def read_decoded_frames(self):
+        frame_buffer = b''
         while self.running and self.gstreamer_process:
             try:
-                frame_data = self.gstreamer_process.stdout.read(65535)
-                if frame_data:
+                chunk = self.gstreamer_process.stdout.read(65535)
+                if not chunk:
+                    break
+                
+                frame_buffer += chunk
+                
+                while len(frame_buffer) > 2:
+                    jpeg_start = frame_buffer.find(b'\xff\xd8')
+                    if jpeg_start == -1:
+                        break
+                    
+                    jpeg_end = frame_buffer.find(b'\xff\xd9', jpeg_start)
+                    if jpeg_end == -1:
+                        break
+                    
+                    jpeg_data = frame_buffer[jpeg_start:jpeg_end + 2]
+                    frame_buffer = frame_buffer[jpeg_end + 2:]
+                    
+                    size_header = struct.pack('>I', len(jpeg_data))
+                    frame_with_size = size_header + jpeg_data
+                    
                     with self.video_lock:
                         for client in self.video_clients[:]:
                             try:
-                                client.write(frame_data)
+                                client.write(frame_with_size)
                                 client.flush()
                             except:
                                 if client in self.video_clients:
