@@ -54,6 +54,46 @@ class VideoReceiver:
                     'fdsrc', 'fd=0',
                     '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
                     '!', 'h264parse',
+                    '!', 'v4l2h264dec',
+                    '!', 'videoconvert',
+                    '!', 'autovideosink', 'sync=false'
+                ]
+            },
+            {
+                'name': 'Software avdec + ximagesink',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'avdec_h264',
+                    '!', 'videoconvert',
+                    '!', 'ximagesink', 'sync=false'
+                ]
+            },
+            {
+                'name': 'Software avdec + autovideosink',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'avdec_h264',
+                    '!', 'videoconvert',
+                    '!', 'autovideosink', 'sync=false'
+                ]
+            }
+        ]
+        
+        return pipelines
+    
+    def start_decoder(self):
+        pipelines = self.detect_decoder_pipeline()
+        
+        for pipeline_info in pipelines:
+            try:
+                pipeline = pipeline_info['cmd']
+                print(f"Trying: {pipeline_info['name']}")
         print(f"DISPLAY environment: {os.environ.get('DISPLAY', 'NOT SET')}")
         
         for pipeline_info in pipelines:
@@ -77,47 +117,7 @@ class VideoReceiver:
                     bufsize=0
                 )
                 
-                time.sleep(1.0
-                    'gst-launch-1.0', '-e',
-                    'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
-                    '!', 'h264parse',
-                    '!', 'avdec_h264',
-                    '!', 'videoconvert',
-                    '!', 'autovideosink', 'sync=false'
-                ]
-            }
-        ]
-        
-        return pipelines
-    
-    def start_decoder(self):
-        pipelines = self.detect_decoder_pipeline()
-        
-        for pipeline_info in pipelines:
-            try:
-                pipeline = pipeline_info['cmd']
-                print(f"Trying: {pipeline_info['name']}")
-                print(f"Command: {' '.join(pipeline)}")
-                
-                env = os.environ.copy()
-                if 'DISPLAY' not in env:
-                    env['DISPLAY'] = ':0'
-                
-                self.decoder_process = subprocess.Popen(
-                    pipeline,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=env,
-                    bufsize=0
-                )
-                
-                time.sleep(0.5)
-                
-                if self.decoder_process.poll() is None:
-                    self.decoder_type = pipeline_info['name']
-                    print(f"✓ Decoder started: {self.decoder_type}")
+                time.sleep(1.0Decoder started: {self.decoder_type}")
                     
                     threading.Thread(target=self.monitor_decoder_errors, daemon=True).start()
                     return True
