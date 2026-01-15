@@ -21,10 +21,12 @@ class VideoReceiver:
         self.browser_process = None
         self.running = False
         self.connected = False
+        self.streaming = False
         self.http_server = None
         self.http_thread = None
         self.video_clients = []
         self.video_lock = threading.Lock()
+        self.waiting_html = self.load_waiting_html()
     
     def get_local_ip(self):
         try:
@@ -35,6 +37,20 @@ class VideoReceiver:
             return ip
         except Exception:
             return '0.0.0.0'
+    
+    def load_waiting_html(self):
+        try:
+            template_path = Path(__file__).parent / 'waiting.html'
+            if template_path.exists():
+                with open(template_path, 'r') as f:
+                    html = f.read()
+                local_ip = self.get_local_ip()
+                html = html.replace('{{IP_ADDRESS}}', local_ip)
+                html = html.replace('{{PORT}}', str(self.port))
+                return html
+        except Exception as e:
+            print(f"Failed to load waiting.html: {e}")
+        return None
     
     def find_browser(self):
         browsers = [
@@ -104,9 +120,17 @@ class VideoReceiver:
                         self.send_header('Content-type', 'text/html')
                         self.end_headers()
                         
-                        html = receiver_instance.generate_stream_html()
+                        if receiver_instance.streaming:
+                            html = receiver_instance.generate_stream_html()
+                        else:
+                            html = receiver_instance.waiting_html if receiver_instance.waiting_html else receiver_instance.generate_stream_html()
+                        
                         self.wfile.write(html.encode())
                     elif self.path == '/stream':
+                        if not receiver_instance.streaming:
+                            self.send_error(503, 'Not streaming')
+                            return
+                        
                         self.send_response(200)
                         self.send_header('Content-Type', 'video/h264')
                         self.send_header('Cache-Control', 'no-cache')
@@ -117,7 +141,7 @@ class VideoReceiver:
                             receiver_instance.video_clients.append(self.wfile)
                         
                         try:
-                            while receiver_instance.running:
+                            while receiver_instance.running and receiver_instance.streaming:
                                 time.sleep(0.1)
                         finally:
                             with receiver_instance.video_lock:
@@ -421,8 +445,12 @@ if __name__ == '__main__':
             continue
         
         if not receiver.start_gstreamer():
+            receiver.streaming = False
             time.sleep(5)
             continue
+        
+        receiver.streaming = True
+        print("Started streaming to browser")
         
         try:
             receiver.receive_and_decode(initial_data)
@@ -431,7 +459,9 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Streaming error: {e}")
         finally:
+            receiver.streaming = False
             receiver.connected = False
+            print("Stopped streaming, showing waiting page")
             if receiver.gstreamer_process:
                 receiver.gstreamer_process.terminate()
                 try:
