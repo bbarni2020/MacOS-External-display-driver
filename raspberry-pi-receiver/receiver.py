@@ -90,10 +90,6 @@ class VideoReceiver:
     def start_decoder(self):
         pipelines = self.detect_decoder_pipeline()
         
-        for pipeline_info in pipelines:
-            try:
-                pipeline = pipeline_info['cmd']
-                print(f"Trying: {pipeline_info['name']}")
         print(f"DISPLAY environment: {os.environ.get('DISPLAY', 'NOT SET')}")
         
         for pipeline_info in pipelines:
@@ -117,8 +113,11 @@ class VideoReceiver:
                     bufsize=0
                 )
                 
-                time.sleep(1.0Decoder started: {self.decoder_type}")
-                    
+                time.sleep(1.0)
+                
+                if self.decoder_process.poll() is None:
+                    self.decoder_type = pipeline_info['name']
+                    print(f"✓ Decoder started: {self.decoder_type}")
                     threading.Thread(target=self.monitor_decoder_errors, daemon=True).start()
                     return True
                 else:
