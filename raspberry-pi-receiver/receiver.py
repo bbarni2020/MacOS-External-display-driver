@@ -143,9 +143,8 @@ class VideoReceiver:
     
     def wait_for_connection(self):
         print("Waiting for initial connection from Mac...")
-        start_time = time.time()
         
-        while not self.connected and self.running:
+        while self.running:
             try:
                 data, addr = self.sock.recvfrom(65535)
                 if data and len(data) > 0:
@@ -153,15 +152,11 @@ class VideoReceiver:
                     self.connected = True
                     return data, addr
             except socket.timeout:
-                if time.time() - start_time > 300:
-                    print("Connection timeout after 5 minutes")
-                    return None, None
                 continue
             except Exception as e:
-                print(f"Error waiting for connection: {e}")
-                return None, None
-        
-        return None, None
+                if self.running:
+                    print(f"Error waiting for connection: {e}")
+                continue
     
     def receive_and_decode(self, initial_data=None):
         self.running = True
@@ -229,31 +224,46 @@ def signal_handler(sig, frame):
 
 if __name__ == '__main__':
     receiver = VideoReceiver()
+    receiver.running = True
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    receiver.start_waiting_page()
-    
-    if not receiver.connect_to_mac():
-        receiver.stop()
-        sys.exit(1)
-    
-    initial_data, addr = receiver.wait_for_connection()
-    
-    if not initial_data:
-        receiver.stop()
-        sys.exit(1)
-    
-    receiver.stop_waiting_page()
-    
-    if not receiver.start_gstreamer():
-        receiver.stop()
-        sys.exit(1)
-    
-    try:
-        receiver.receive_and_decode(initial_data)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        receiver.stop()
+    while receiver.running:
+        receiver.start_waiting_page()
+        
+        if not receiver.connect_to_mac():
+            receiver.stop_waiting_page()
+            time.sleep(5)
+            continue
+        
+        initial_data, addr = receiver.wait_for_connection()
+        
+        if not initial_data or not receiver.running:
+            receiver.stop_waiting_page()
+            time.sleep(5)
+            continue
+        
+        receiver.stop_waiting_page()
+        
+        if not receiver.start_gstreamer():
+            receiver.stop_waiting_page()
+            time.sleep(5)
+            continue
+        
+        try:
+            receiver.receive_and_decode(initial_data)
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"Streaming error: {e}")
+        finally:
+            receiver.connected = False
+            if receiver.gstreamer_process:
+                receiver.gstreamer_process.terminate()
+                try:
+                    receiver.gstreamer_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    receiver.gstreamer_process.kill()
+                receiver.gstreamer_process = None
+            time.sleep(5)
