@@ -83,9 +83,9 @@ class VideoReceiver:
             browser = self.find_browser()
             if not browser:
                 print("Warning: No compatible browser found, skipping browser display")
-                return False
+
             
-            if not self.start_http_server(8080):
+            if not self.start_http_server(8888):
                 return False
             
             local_ip = self.get_local_ip()
@@ -96,7 +96,7 @@ class VideoReceiver:
             else:
                 args.extend(['--kiosk', '--noerrdialogs', '--disable-infobars', '--no-first-run', '--disable-session-crashed-bubble', '--disable-features=TranslateUI'])
             
-            args.append(f'http://localhost:8080')
+            args.append(f'http://localhost:8888')
             
             self.browser_process = subprocess.Popen(
                 args,
