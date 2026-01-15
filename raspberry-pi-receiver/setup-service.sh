@@ -1,25 +1,45 @@
 #!/bin/bash
 
-echo "Setting up Virtual Display Receiver service..."
+set -e
 
-SERVICE_FILE="virtual-display.service"
-INSTALL_DIR="/home/pi/virtual-display"
+if [ "$EUID" -ne 0 ]; then 
+    echo "Please run as root (use sudo)"
+    exit 1
+fi
 
-sudo mkdir -p "$INSTALL_DIR"
-sudo cp receiver.py "$INSTALL_DIR/"
-sudo chmod +x "$INSTALL_DIR/receiver.py"
+SERVICE_FILE="/etc/systemd/system/deskextend.service"
 
-sudo cp "$SERVICE_FILE" /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable virtual-display.service
+echo "Installing DeskExtend as system service..."
 
-echo ""
-echo "Service installed and enabled!"
-echo ""
-echo "Commands:"
-echo "  Start:   sudo systemctl start virtual-display"
-echo "  Stop:    sudo systemctl stop virtual-display"
-echo "  Status:  sudo systemctl status virtual-display"
-echo "  Logs:    sudo journalctl -u virtual-display -f"
-echo ""
-echo "The service will start automatically on boot."
+cat > "$SERVICE_FILE" << 'EOF'
+[Unit]
+Description=DeskExtend Video Receiver
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/pi/deskextend
+Environment="DISPLAY=:0"
+Environment="GST_DEBUG=0"
+Environment="GST_OMX_CONFIG_DIR=/opt/vc/lib"
+ExecStart=/usr/bin/python3 /home/pi/deskextend/receiver.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+INSTALL_DIR="/home/pi/deskextend"
+mkdir -p "$INSTALL_DIR"
+cp receiver.py "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/receiver.py"
+
+systemctl daemon-reload
+systemctl enable deskextend.service
+systemctl start deskextend.service
+
+echo "Service installed and started!"
+echo "Status: systemctl status deskextend"
+echo "Logs: journalctl -u deskextend -f"
