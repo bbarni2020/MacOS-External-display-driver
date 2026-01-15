@@ -24,7 +24,7 @@ class VideoReceiver:
     def detect_decoder_pipeline(self):
         pipelines = [
             {
-                'name': 'Hardware v4l2 + autovideosink',
+                'name': 'Hardware v4l2 + ximagesink',
                 'cmd': [
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
@@ -32,12 +32,52 @@ class VideoReceiver:
                     '!', 'h264parse',
                     '!', 'v4l2h264dec',
                     '!', 'videoconvert',
-                    '!', 'autovideosink', 'sync=false'
+                    '!', 'ximagesink', 'sync=false'
                 ]
             },
             {
-                'name': 'Software avdec + autovideosink',
+                'name': 'Hardware v4l2 + xvimagesink',
                 'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'v4l2h264dec',
+                    '!', 'videoconvert',
+                    '!', 'xvimagesink', 'sync=false'
+                ]
+            },
+            {
+                'name': 'Hardware v4l2 + autovideosink',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+        print(f"DISPLAY environment: {os.environ.get('DISPLAY', 'NOT SET')}")
+        
+        for pipeline_info in pipelines:
+            try:
+                pipeline = pipeline_info['cmd']
+                print(f"Trying: {pipeline_info['name']}")
+                print(f"Command: {' '.join(pipeline)}")
+                
+                env = os.environ.copy()
+                if 'DISPLAY' not in env:
+                    env['DISPLAY'] = ':0'
+                
+                print(f"Using DISPLAY={env['DISPLAY']}")
+                
+                self.decoder_process = subprocess.Popen(
+                    pipeline,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    bufsize=0
+                )
+                
+                time.sleep(1.0
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
                     '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
