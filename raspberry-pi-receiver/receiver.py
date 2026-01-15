@@ -187,7 +187,7 @@ class VideoReceiver:
             justify-content: center;
             align-items: center;
         }}
-        canvas {{
+        img {{
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
@@ -209,66 +209,85 @@ class VideoReceiver:
 <body>
     <div class="status" id="status">Connecting...</div>
     <div id="video-container">
-        <canvas id="canvas"></canvas>
+        <img id="frame" />
     </div>
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
         const status = document.getElementById('status');
-        
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        
-        window.addEventListener('resize', () => {{
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }});
-        
-        let ws = null;
+        const frame = document.getElementById('frame');
         let reconnectInterval = null;
+        let abortController = null;
         
-        function connect() {{
+        async function startStream() {{
             try {{
-                ws = new WebSocket('ws://{local_ip}:8081');
+                abortController = new AbortController();
+                const response = await fetch('/stream', {{ signal: abortController.signal }});
                 
-                ws.onopen = () => {{
-                    status.textContent = 'Connected - Streaming';
-                    status.style.color = '#0f0';
-                    if (reconnectInterval) {{
-                        clearInterval(reconnectInterval);
-                        reconnectInterval = null;
+                if (!response.ok) {{
+                    throw new Error('Stream not available');
+                }}
+                
+                status.textContent = 'Connected - Streaming';
+                status.style.color = '#0f0';
+                
+                if (reconnectInterval) {{
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }}
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = new Uint8Array();
+                let jpegStart = null;
+                
+                while (true) {{
+                    const {{ done, value }} = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = new Uint8Array(buffer.length + value.length);
+                    chunk.set(buffer);
+                    chunk.set(value, buffer.length);
+                    buffer = chunk;
+                    
+                    let pos = 0;
+                    while (pos < buffer.length - 1) {{
+                        if (buffer[pos] === 0xFF && buffer[pos + 1] === 0xD8) {{
+                            jpegStart = pos;
+                        }}
+                        if (jpegStart !== null && buffer[pos] === 0xFF && buffer[pos + 1] === 0xD9) {{
+                            const jpegData = buffer.slice(jpegStart, pos + 2);
+                            const blob = new Blob([jpegData], {{ type: 'image/jpeg' }});
+                            const url = URL.createObjectURL(blob);
+                            frame.src = url;
+                            buffer = buffer.slice(pos + 2);
+                            jpegStart = null;
+                            pos = 0;
+                            continue;
+                        }}
+                        pos++;
                     }}
-                }};
+                }}
                 
-                ws.onmessage = (event) => {{
-                    if (event.data instanceof Blob) {{
-                        createImageBitmap(event.data).then(bitmap => {{
-                            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-                        }}).catch(() => {{}});
-                    }}
-                }};
-                
-                ws.onerror = () => {{
+                status.textContent = 'Disconnected - Reconnecting...';
+                status.style.color = '#ff0';
+                reconnect();
+            }} catch (e) {{
+                if (e.name !== 'AbortError') {{
                     status.textContent = 'Connection Error';
                     status.style.color = '#f00';
-                }};
-                
-                ws.onclose = () => {{
-                    status.textContent = 'Disconnected - Reconnecting...';
-                    status.style.color = '#ff0';
-                    if (!reconnectInterval) {{
-                        reconnectInterval = setInterval(() => {{
-                            connect();
-                        }}, 2000);
-                    }}
-                }};
-            }} catch (e) {{
-                status.textContent = 'Failed to connect';
-                status.style.color = '#f00';
+                    reconnect();
+                }}
             }}
         }}
         
-        connect();
+        function reconnect() {{
+            if (!reconnectInterval) {{
+                reconnectInterval = setInterval(() => {{
+                    startStream();
+                }}, 2000);
+            }}
+        }}
+        
+        startStream();
     </script>
 </body>
 </html>'''
