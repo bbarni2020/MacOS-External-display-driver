@@ -8,6 +8,13 @@ import sys
 import threading
 import time
 import os
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 class VideoReceiver:
     def __init__(self, host='0.0.0.0', port=5900):
@@ -20,31 +27,19 @@ class VideoReceiver:
         self.last_fps_time = time.time()
         self.current_fps = 0
         self.decoder_type = None
+        self.bytes_received = 0
     
     def detect_decoder_pipeline(self):
         pipelines = [
             {
-                'name': 'Hardware v4l2 + ximagesink',
+                'name': 'Hardware MMAL + KMS',
                 'cmd': [
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
                     '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
                     '!', 'h264parse',
                     '!', 'v4l2h264dec',
-                    '!', 'videoconvert',
-                    '!', 'ximagesink', 'sync=false'
-                ]
-            },
-            {
-                'name': 'Hardware v4l2 + xvimagesink',
-                'cmd': [
-                    'gst-launch-1.0', '-e',
-                    'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
-                    '!', 'h264parse',
-                    '!', 'v4l2h264dec',
-                    '!', 'videoconvert',
-                    '!', 'xvimagesink', 'sync=false'
+                    '!', 'v4l2sink', 'device=/dev/video0', 'sync=false'
                 ]
             },
             {
@@ -52,23 +47,23 @@ class VideoReceiver:
                 'cmd': [
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
                     '!', 'h264parse',
-                    '!', 'v4l2h264dec',
+                    '!', 'v4l2h264dec', 'capture-io-mode=mmap',
                     '!', 'videoconvert',
                     '!', 'autovideosink', 'sync=false'
                 ]
             },
             {
-                'name': 'Software avdec + ximagesink',
+                'name': 'Hardware v4l2 + gtksink',
                 'cmd': [
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
                     '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
                     '!', 'h264parse',
-                    '!', 'avdec_h264',
+                    '!', 'v4l2h264dec',
                     '!', 'videoconvert',
-                    '!', 'ximagesink', 'sync=false'
+                    '!', 'gtksink', 'sync=false'
                 ]
             },
             {
@@ -76,9 +71,9 @@ class VideoReceiver:
                 'cmd': [
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
                     '!', 'h264parse',
-                    '!', 'avdec_h264',
+                    '!', 'avdec_h264', 'max-threads=4',
                     '!', 'videoconvert',
                     '!', 'autovideosink', 'sync=false'
                 ]
@@ -95,14 +90,11 @@ class VideoReceiver:
         for pipeline_info in pipelines:
             try:
                 pipeline = pipeline_info['cmd']
-                print(f"Trying: {pipeline_info['name']}")
-                print(f"Command: {' '.join(pipeline)}")
+                logger.info(f"Trying: {pipeline_info['name']}")
                 
                 env = os.environ.copy()
                 if 'DISPLAY' not in env:
                     env['DISPLAY'] = ':0'
-                
-                print(f"Using DISPLAY={env['DISPLAY']}")
                 
                 self.decoder_process = subprocess.Popen(
                     pipeline,
@@ -117,18 +109,21 @@ class VideoReceiver:
                 
                 if self.decoder_process.poll() is None:
                     self.decoder_type = pipeline_info['name']
-                    print(f"✓ Decoder started: {self.decoder_type}")
+                    logger.info(f"Decoder started: {self.decoder_type}")
                     threading.Thread(target=self.monitor_decoder_errors, daemon=True).start()
                     return True
                 else:
-                    stderr = self.decoder_process.stderr.read().decode('utf-8', errors='ignore')
-                    print(f"✗ Failed: {stderr[:200]}")
+                    try:
+                        stderr = self.decoder_process.stderr.read().decode('utf-8', errors='ignore')
+                        logger.warning(f"Failed: {stderr[:200]}")
+                    except:
+                        pass
                     
             except Exception as e:
-                print(f"✗ Error: {e}")
+                logger.warning(f"Error: {e}")
                 continue
         
-        print("All decoder pipelines failed!")
+        logger.error("All decoder pipelines failed")
         return False
     
     def monitor_decoder_errors(self):
@@ -143,7 +138,7 @@ class VideoReceiver:
                 
                 line = line.decode('utf-8', errors='ignore').strip()
                 if line and ('ERROR' in line or 'WARN' in line):
-                    print(f"GStreamer: {line}")
+                    logger.warning(f"GStreamer: {line}")
             except:
                 break
     
@@ -156,10 +151,10 @@ class VideoReceiver:
             self.sock.bind((self.host, self.port))
             self.sock.listen(1)
             self.sock.settimeout(5.0)
-            print(f"Listening on {self.host}:{self.port}")
+            logger.info(f"Listening on {self.host}:{self.port}")
             return True
         except Exception as e:
-            print(f"Socket bind failed: {e}")
+            logger.error(f"Socket bind failed: {e}")
             return False
     
     def update_fps(self):
@@ -168,29 +163,32 @@ class VideoReceiver:
         elapsed = now - self.last_fps_time
         if elapsed >= 1.0:
             self.current_fps = self.frame_count / elapsed
-            print(f"FPS: {self.current_fps:.1f}")
+            mbps = (self.bytes_received * 8) / (elapsed * 1_000_000)
+            logger.info(f"FPS: {self.current_fps:.1f} | Bitrate: {mbps:.1f} Mbps | Frames: {self.frame_count}")
             self.frame_count = 0
+            self.bytes_received = 0
             self.last_fps_time = now
     
     def process_stream(self, conn):
-        print("Processing video stream...")
+        logger.info("Processing video stream...")
         
         buffer = b''
         
         while self.running:
             try:
-                chunk = conn.recv(131072)
+                chunk = conn.recv(262144)
                 if not chunk:
-                    print("Connection closed")
+                    logger.info("Connection closed")
                     break
                 
                 buffer += chunk
+                self.bytes_received += len(chunk)
                 
                 while len(buffer) >= 4:
                     frame_size = struct.unpack('>I', buffer[:4])[0]
                     
                     if frame_size > 10485760:
-                        print(f"Invalid frame size: {frame_size}")
+                        logger.warning(f"Invalid frame size: {frame_size}")
                         buffer = buffer[1:]
                         continue
                     
@@ -206,20 +204,16 @@ class VideoReceiver:
                             self.decoder_process.stdin.flush()
                             self.update_fps()
                         except BrokenPipeError:
-                            print("Decoder pipe broken - restarting...")
-                            if self.decoder_process and self.decoder_process.stderr:
-                                stderr = self.decoder_process.stderr.read().decode('utf-8', errors='ignore')
-                                if stderr:
-                                    print(f"Decoder error: {stderr[:500]}")
+                            logger.error("Decoder pipe broken - restarting...")
                             return False
                         except Exception as e:
-                            print(f"Decoder write error: {e}")
+                            logger.error(f"Decoder write error: {e}")
                             return False
                     
             except socket.timeout:
                 continue
             except Exception as e:
-                print(f"Receive error: {e}")
+                logger.error(f"Receive error: {e}")
                 break
         
         return True
@@ -230,12 +224,12 @@ class VideoReceiver:
         if not self.bind_socket():
             return
         
-        print("Waiting for connection...")
+        logger.info("Waiting for connection...")
         
         while self.running:
             try:
                 conn, addr = self.sock.accept()
-                print(f"Connected from {addr}")
+                logger.info(f"Connected from {addr}")
                 
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
@@ -245,6 +239,7 @@ class VideoReceiver:
                     continue
                 
                 self.frame_count = 0
+                self.bytes_received = 0
                 self.last_fps_time = time.time()
                 
                 self.process_stream(conn)
@@ -259,13 +254,13 @@ class VideoReceiver:
                         self.decoder_process.kill()
                     self.decoder_process = None
                 
-                print("Connection closed, waiting for next connection...")
+                logger.info("Connection closed, waiting for next connection...")
                 
             except socket.timeout:
                 continue
             except Exception as e:
                 if self.running:
-                    print(f"Connection error: {e}")
+                    logger.error(f"Connection error: {e}")
                     time.sleep(1)
     
     def stop(self):
@@ -281,12 +276,12 @@ class VideoReceiver:
         if self.sock:
             self.sock.close()
         
-        print("Receiver stopped")
+        logger.info("Receiver stopped")
 
 receiver = None
 
 def signal_handler(sig, frame):
-    print("\nShutting down...")
+    logger.info("Shutting down...")
     if receiver:
         receiver.stop()
     sys.exit(0)
@@ -297,4 +292,5 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    logger.info("Video receiver starting on 0.0.0.0:5900")
     receiver.run()

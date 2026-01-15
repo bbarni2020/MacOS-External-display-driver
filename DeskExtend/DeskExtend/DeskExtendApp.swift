@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
         NSApplication.shared.setActivationPolicy(.accessory)
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
     }
     
     @objc func windowDidBecomeKey(_ notification: Notification) {
@@ -26,9 +27,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc func windowWillClose(_ notification: Notification) {
-        DispatchQueue.main.async {
-            self.appManager?.windowIsOpen = false
-            NSApplication.shared.setActivationPolicy(.accessory)
+        if let window = notification.object as? NSWindow {
+            if window.identifier?.rawValue == "main" {
+                DispatchQueue.main.async {
+                    self.appManager?.windowIsOpen = false
+                    NSApplication.shared.setActivationPolicy(.accessory)
+                }
+            }
         }
     }
     
@@ -37,7 +42,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        return shouldAllowTermination ? .terminateNow : .terminateCancel
+        if shouldAllowTermination {
+            return .terminateNow
+        }
+        return .terminateCancel
     }
 }
 
@@ -46,26 +54,47 @@ struct DeskExtendApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appManager = AppManager()
     @StateObject private var permissionManager = PermissionManager()
+    @State private var senderController: SenderController?
     @Environment(\.openWindow) private var openWindow
     
     var body: some Scene {
-        Window("DeskExtend", id: "main", content: {
+        Window("DeskExtend", id: "main") {
             DashboardView()
                 .environmentObject(appManager)
                 .environmentObject(permissionManager)
-                .frame(minWidth: 900, minHeight: 700)
+                .frame(minWidth: 800, maxWidth: 1200, minHeight: 600, maxHeight: .infinity)
                 .onAppear {
                     appDelegate.appManager = appManager
                     appManager.windowIsOpen = true
                     NSApplication.shared.setActivationPolicy(.regular)
+                    
+                    if let window = NSApplication.shared.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+                        window.isRestorable = false
+                        window.styleMask.remove(.fullScreen)
+                        window.center()
+                    }
+                    
+                    if senderController == nil {
+                        senderController = SenderController(appManager: appManager)
+                        appManager.onConnect = { host, port in
+                            senderController?.connect(host: host, port: port)
+                        }
+                        appManager.onConnect60fps = { host, port in
+                            senderController?.connect60fps(host: host, port: port)
+                        }
+                        appManager.onDisconnect = { [weak senderController] in
+                            senderController?.stop()
+                        }
+                    }
                 }
-        })
-        .windowStyle(.hiddenTitleBar)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
         .commands {
             CommandGroup(replacing: .newItem) { }
         }
         
-        MenuBarExtra("DeskExtend", systemImage: appManager.isConnected ? "display.trianglebadge.exclamationmark.fill" : "display") {
+        MenuBarExtra("DeskExtend", systemImage: "display") {
             MenuBarView()
                 .environmentObject(appManager)
                 .environmentObject(permissionManager)

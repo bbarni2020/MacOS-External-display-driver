@@ -6,49 +6,53 @@ import CoreVideo
 @available(macOS 13.0, *)
 class ScreenCaptureEngine: NSObject {
     private let config: DisplayConfig
-    private let windowID: Int
+    private let targetDisplay: DisplayInfo
     private let encoder: VideoEncoder
     private var stream: SCStream?
     private var streamOutput: StreamOutput?
+    private let queue = DispatchQueue(label: "com.virtualdisplay.screencapture", qos: .userInteractive)
     
-    init(config: DisplayConfig, windowID: Int, encoder: VideoEncoder) {
+    init(config: DisplayConfig, targetDisplay: DisplayInfo, encoder: VideoEncoder) {
         self.config = config
-        self.windowID = windowID
+        self.targetDisplay = targetDisplay
         self.encoder = encoder
         super.init()
     }
     
     func start() throws {
+        queue.async { [weak self] in
+            do {
+                try self?.performCapture()
+            } catch {
+                self?.encoder.handleCaptureError(error)
+            }
+        }
+    }
+    
+    private func performCapture() throws {
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(
                     false,
-                    onScreenWindowsOnly: true
+                    onScreenWindowsOnly: false
                 )
                 
-                guard let window = content.windows.first(where: { $0.windowID == UInt32(windowID) }) else {
-                    print("Warning: Target window not found, capturing main display")
-                    try await captureMainDisplay(content: content)
-                    return
+                guard let display = findTargetDisplay(in: content) else {
+                    throw CaptureError.displayNotFound
                 }
                 
-                let filter = SCContentFilter(desktopIndependentWindow: window)
+                let filter = SCContentFilter(display: display, excludingWindows: [])
                 try await startStream(with: filter)
-                
             } catch {
-                print("Screen capture error: \(error)")
                 throw error
             }
         }
     }
     
-    private func captureMainDisplay(content: SCShareableContent) async throws {
-        guard let display = content.displays.first else {
-            throw CaptureError.noDisplayFound
+    private func findTargetDisplay(in content: SCShareableContent) -> SCDisplay? {
+        return content.displays.first { display in
+            display.displayID == UInt32(self.targetDisplay.id)
         }
-        
-        let filter = SCContentFilter(display: display, excludingWindows: [])
-        try await startStream(with: filter)
     }
     
     private func startStream(with filter: SCContentFilter) async throws {
@@ -62,6 +66,7 @@ class ScreenCaptureEngine: NSObject {
         streamConfig.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         streamConfig.queueDepth = 3
         streamConfig.showsCursor = true
+        streamConfig.captureResolution = .automatic
         
         stream = SCStream(filter: filter, configuration: streamConfig, delegate: nil)
         
@@ -70,14 +75,10 @@ class ScreenCaptureEngine: NSObject {
         try stream?.addStreamOutput(
             streamOutput!,
             type: .screen,
-            sampleHandlerQueue: DispatchQueue(
-                label: "com.virtualdisplay.capture",
-                qos: .userInteractive
-            )
+            sampleHandlerQueue: queue
         )
         
         try await stream?.startCapture()
-        print("Screen capture stream started")
     }
     
     func stop() {
@@ -85,7 +86,7 @@ class ScreenCaptureEngine: NSObject {
             do {
                 try await stream?.stopCapture()
             } catch {
-                print("Error stopping capture: \(error)")
+                encoder.handleCaptureError(error)
             }
         }
     }
@@ -114,5 +115,6 @@ class StreamOutput: NSObject, SCStreamOutput {
 
 enum CaptureError: Error {
     case noDisplayFound
+    case displayNotFound
     case windowNotFound
 }

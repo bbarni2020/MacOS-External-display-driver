@@ -7,82 +7,53 @@ app.setActivationPolicy(.accessory)
 let delegate = AppDelegate()
 app.delegate = delegate
 
-print("Virtual Display Sender starting...")
-print("Target resolution: 1920x1080 @ 30 FPS")
-
 app.run()
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var virtualDisplay: VirtualDisplay?
-    var networkTransport: NetworkTransport?
+    var connectionManager: ConnectionManager?
     var menuBarController: MenuBarController?
-    var startTime: Date?
     var statsTimer: Timer?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         menuBarController = MenuBarController()
         menuBarController?.setup()
         
-        do {
-            let config = DisplayConfig(
-                width: 1920,
-                height: 1080,
-                fps: 30,
-                bitrate: 8_000_000
-            )
-            
-            networkTransport = NetworkTransport(statusCallback: { [weak self] connected, address in
-                self?.menuBarController?.isConnected = connected
-                if connected {
-                    self?.startTime = Date()
-                }
-                self?.updateStats(piAddress: address)
-            })
-            try networkTransport?.start()
-            
-            virtualDisplay = VirtualDisplay(config: config, transport: networkTransport!)
-            try virtualDisplay?.start()
-            
-            print("Virtual display started successfully")
-            print("Listening for Pi connection on port 5900")
-            
-            statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                self?.updateStats()
+        connectionManager = ConnectionManager()
+        
+        menuBarController?.onConnectRequested = { [weak self] mode in
+            self?.connectionManager?.connect(mode: mode)
+        }
+        
+        menuBarController?.onDisconnectRequested = { [weak self] in
+            self?.connectionManager?.disconnect()
+        }
+        
+        if ConfigurationManager.shared.autoConnect {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.connectionManager?.connect(mode: ConfigurationManager.shared.connectionMode)
             }
-        } catch {
-            print("Failed to start virtual display: \(error)")
-            NSApplication.shared.terminate(nil)
+        }
+        
+        statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateStats()
         }
     }
     
-    private func updateStats(piAddress: String? = nil) {
+    private func updateStats() {
+        guard let manager = connectionManager else { return }
+        
         var stats = ConnectionStats()
-        
-        if let transport = networkTransport {
-            stats.bitrate = transport.currentBitrate
-            stats.piAddress = piAddress ?? (menuBarController?.isConnected == true ? transport.connectedAddress : "Not connected")
-        }
-        
-        if let display = virtualDisplay {
-            stats.fps = display.currentConfig.fps
-            stats.resolution = "\(display.currentConfig.width)×\(display.currentConfig.height)"
-            
-            if let encoder = display.videoEncoder {
-                stats.encodedFrames = encoder.frameCount
-            }
-        }
-        
-        if let start = startTime {
-            stats.uptime = Date().timeIntervalSince(start)
-        }
+        stats.isConnected = manager.isConnected
+        stats.piAddress = manager.currentAddress
+        stats.connectionMode = manager.connectionMode
+        stats.diagnostics = manager.diagnosticInfo
         
         menuBarController?.stats = stats
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         statsTimer?.invalidate()
-        virtualDisplay?.stop()
-        networkTransport?.stop()
-        print("Virtual display stopped")
+        connectionManager?.disconnect()
     }
 }

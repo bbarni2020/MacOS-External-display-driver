@@ -7,11 +7,15 @@ class VideoEncoder {
     private let config: DisplayConfig
     private var compressionSession: VTCompressionSession?
     private let outputCallback: (Data) -> Void
+    private let queue = DispatchQueue(label: "com.virtualdisplay.encoder")
     private(set) var frameCount: Int = 0
+    private var frameDropCounter: Int = 0
+    private var encodingStartTime: CFAbsoluteTime = 0
     
     init(config: DisplayConfig, outputCallback: @escaping (Data) -> Void) {
         self.config = config
         self.outputCallback = outputCallback
+        self.encodingStartTime = CFAbsoluteTimeGetCurrent()
         setupCompressionSession()
     }
     
@@ -32,7 +36,6 @@ class VideoEncoder {
         )
         
         guard status == noErr, let session = session else {
-            print("Failed to create compression session: \(status)")
             return
         }
         
@@ -72,14 +75,22 @@ class VideoEncoder {
             value: kCFBooleanFalse
         )
         
+        VTSessionSetProperty(
+            session,
+            key: kVTCompressionPropertyKey_EnableLowLatencyMode,
+            value: kCFBooleanTrue
+        )
+        
         VTCompressionSessionPrepareToEncodeFrames(session)
         
         self.compressionSession = session
-        print("Encoder initialized: H.264, \(config.bitrate / 1_000_000) Mbps")
     }
     
     func encode(pixelBuffer: CVPixelBuffer, timestamp: CMTime) {
-        guard let session = compressionSession else { return }
+        guard let session = compressionSession else { 
+            frameDropCounter += 1
+            return 
+        }
         
         let presentationTimestamp = CMTime(
             value: Int64(frameCount),
@@ -88,7 +99,7 @@ class VideoEncoder {
         
         frameCount += 1
         
-        VTCompressionSessionEncodeFrame(
+        let status = VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: presentationTimestamp,
@@ -97,6 +108,10 @@ class VideoEncoder {
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
+        
+        if status != noErr {
+            frameDropCounter += 1
+        }
     }
     
     func stop() {
@@ -107,9 +122,11 @@ class VideoEncoder {
         }
     }
     
+    func handleCaptureError(_ error: Error) {
+    }
+    
     fileprivate func handleEncodedFrame(status: OSStatus, sampleBuffer: CMSampleBuffer) {
         guard status == noErr else {
-            print("Encoding error: \(status)")
             return
         }
         

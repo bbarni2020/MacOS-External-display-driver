@@ -2,7 +2,6 @@ import Foundation
 import Network
 
 class NetworkTransport {
-    private var listener: NWListener?
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "com.virtualdisplay.network")
     private let port: UInt16 = 5900
@@ -10,70 +9,93 @@ class NetworkTransport {
     private var bytesSent: UInt64 = 0
     private var lastStatsTime = Date()
     private var statusCallback: ((Bool, String) -> Void)?
+    private var logCallback: ((String) -> Void)?
+    private var targetHost: String?
+    private var reconnectTimer: Timer?
+    private var isAttemptingConnection = false
     
     var currentBitrate: Double = 0.0
     var connectedAddress: String = "Not connected"
     
-    init(statusCallback: ((Bool, String) -> Void)? = nil) {
+    init(statusCallback: ((Bool, String) -> Void)? = nil, logCallback: ((String) -> Void)? = nil) {
         self.statusCallback = statusCallback
+        self.logCallback = logCallback
     }
     
-    func start() throws {
-        let params = NWParameters.udp
-        params.allowLocalEndpointReuse = true
-        
-        listener = try NWListener(using: params, on: NWEndpoint.Port(integerLiteral: port))
-        
-        listener?.newConnectionHandler = { [weak self] newConnection in
-            self?.handleNewConnection(newConnection)
+    func connect(to host: String) {
+        guard !host.trimmingCharacters(in: .whitespaces).isEmpty else {
+            logCallback?("No address provided")
+            statusCallback?(false, "Not connected")
+            return
         }
-        
-        listener?.stateUpdateHandler = { state in
-            switch state {
-            case .ready:
-                print("Network listener ready on port \(self.port)")
-            case .failed(let error):
-                print("Listener failed: \(error)")
-            default:
-                break
-            }
-        }
-        
-        listener?.start(queue: queue)
-    }
-    
-    private func handleNewConnection(_ newConnection: NWConnection) {
+
+        targetHost = host
+        isAttemptingConnection = true
         connection?.cancel()
         
+        var tcpOptions = NWProtocolTCP.Options()
+        tcpOptions.enableKeepalive = true
+        tcpOptions.keepaliveInterval = 10
+        
+        let parameters = NWParameters(tls: nil, tcp: tcpOptions)
+        parameters.preferNoProxies = true
+        
+        let newConnection = NWConnection(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(integerLiteral: port),
+            using: parameters
+        )
         connection = newConnection
-        connection?.stateUpdateHandler = { [weak self] state in
+
+        logCallback?("Connecting to \(host):\(port) via TCP...")
+        
+        newConnection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                if let endpoint = newConnection.currentPath?.remoteEndpoint {
-                    print("Pi connected: \(endpoint)")
-                    let address = "\(endpoint)"
-                    self?.connectedAddress = address
-                    self?.statusCallback?(true, address)
-                }
+                self?.isAttemptingConnection = false
+                self?.connectedAddress = host
+                self?.statusCallback?(true, host)
+                self?.logCallback?("Connection established")
+            case .preparing:
+                self?.logCallback?("Preparing connection...")
+            case .waiting(let error):
+                self?.logCallback?("Waiting: \(error.localizedDescription)")
             case .failed(let error):
-                print("Connection failed: \(error)")
+                self?.isAttemptingConnection = false
                 self?.connection = nil
                 self?.connectedAddress = "Not connected"
                 self?.statusCallback?(false, "Not connected")
+                self?.logCallback?("Connection failed: \(error.localizedDescription)")
+                self?.scheduleReconnect()
             case .cancelled:
+                self?.isAttemptingConnection = false
                 self?.connection = nil
                 self?.connectedAddress = "Not connected"
                 self?.statusCallback?(false, "Not connected")
-            default:
+                self?.logCallback?("Connection cancelled")
+            @unknown default:
                 break
             }
         }
         
-        connection?.start(queue: queue)
+        newConnection.start(queue: queue)
+    }
+    
+    private func scheduleReconnect() {
+        guard let targetHost = targetHost else { return }
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.reconnectTimer?.invalidate()
+            self?.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+                self?.connect(to: targetHost)
+            }
+        }
     }
     
     func send(data: Data) {
-        guard let connection = connection else { return }
+        guard let connection = connection, connection.state == .ready else { 
+            return 
+        }
         
         var packet = data
         var header = UInt32(data.count).bigEndian
@@ -84,7 +106,7 @@ class NetworkTransport {
             content: packet,
             completion: .contentProcessed { [weak self] error in
                 if let error = error {
-                    print("Send error: \(error)")
+                    self?.logCallback?("Send error: \(error.localizedDescription)")
                 } else {
                     self?.updateStats(bytesSent: packet.count)
                 }
@@ -100,15 +122,16 @@ class NetworkTransport {
         
         if elapsed >= 5.0 {
             let mbps = Double(self.bytesSent) * 8.0 / elapsed / 1_000_000.0
-            print(String(format: "Streaming at %.2f Mbps", mbps))
-            self.currentBitrate = mbps
+            currentBitrate = mbps
             self.bytesSent = 0
             lastStatsTime = now
         }
     }
     
     func stop() {
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
         connection?.cancel()
-        listener?.cancel()
+        connection = nil
     }
 }

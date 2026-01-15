@@ -2,10 +2,17 @@
 
 set -e
 
-echo "Installing dependencies for Raspberry Pi receiver..."
+echo "Installing DeskExtend Receiver for Raspberry Pi..."
 
-sudo apt-get update
-sudo apt-get install -y \
+if [ "$EUID" -ne 0 ]; then 
+    echo "Please run as root (use sudo)"
+    exit 1
+fi
+
+echo "Installing system packages..."
+apt-get update
+apt-get install -y \
+    python3 \
     gstreamer1.0-tools \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
@@ -13,25 +20,22 @@ sudo apt-get install -y \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav \
     gstreamer1.0-omx \
-    python3-pip \
-    python3-venv \
-    firefox \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0
 
-echo ""
-echo "Creating Python virtual environment..."
-cd "$(dirname "$0")"
-python3 -m venv venv
-source venv/bin/activate
+echo "Configuring GPU memory..."
+if ! grep -q "^gpu_mem=" /boot/config.txt; then
+    echo "gpu_mem=256" >> /boot/config.txt
+    echo "GPU memory set to 256MB (reboot required)"
+fi
 
-echo "Installing Python packages in virtual environment..."
-pip install --upgrade pip
+echo "Setting up permissions..."
+chmod +x receiver.py
+chmod +x run.sh
 
-echo ""
-echo "Testing GStreamer installation..."
-gst-launch-1.0 --version
-
-echo ""
 echo "Installation complete!"
-echo "Run the receiver with: ./run.sh"
+echo ""
+echo "To run manually: sudo ./run.sh"
+echo "To install as service: sudo ./setup-service.sh"
+echo ""
+echo "Connect from macOS to: $(hostname -I | awk '{print $1}'):5900"

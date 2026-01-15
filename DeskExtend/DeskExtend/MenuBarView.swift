@@ -3,11 +3,22 @@ import SwiftUI
 struct MenuBarView: View {
     @EnvironmentObject var appManager: AppManager
     @EnvironmentObject var permissionManager: PermissionManager
+    @Environment(\.openWindow) private var openWindow
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: {
-                appManager.shouldOpenWindow = true
+                NSApplication.shared.setActivationPolicy(.regular)
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                
+                if !appManager.windowIsOpen {
+                    openWindow(id: "main")
+                    appManager.windowIsOpen = true
+                } else {
+                    if let window = NSApplication.shared.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+                        window.makeKeyAndOrderFront(nil)
+                    }
+                }
             }) {
                 HStack {
                     Image(systemName: "rectangle.on.rectangle")
@@ -66,6 +77,9 @@ struct MenuBarView: View {
             Divider()
             
             Button("Quit DeskExtend") {
+                if let delegate = NSApplication.shared.delegate as? AppDelegate {
+                    delegate.shouldAllowTermination = true
+                }
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.plain)

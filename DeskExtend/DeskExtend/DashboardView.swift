@@ -7,8 +7,12 @@ struct DashboardView: View {
     
     var body: some View {
         ZStack {
-            Color(nsColor: .controlBackgroundColor)
-                .ignoresSafeArea()
+            LinearGradient(
+                colors: [Color(red: 0.08, green: 0.09, blue: 0.11), Color(red: 0.04, green: 0.05, blue: 0.06)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
             
             VStack(spacing: 0) {
                 HeaderView()
@@ -38,7 +42,8 @@ struct DashboardView: View {
                         }
                         .tag(2)
                 }
-                .padding()
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
             }
         }
         .onAppear {
@@ -56,17 +61,18 @@ struct HeaderView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Image(systemName: appManager.isConnected ? "circle.fill" : "circle")
-                            .foregroundColor(appManager.isConnected ? .green : .gray)
-                            .font(.system(size: 10))
+                        Image(systemName: appManager.isConnected ? "dot.radiowaves.left.and.right" : "wifi.slash")
+                            .foregroundColor(appManager.isConnected ? Color.green : Color.gray)
+                            .font(.system(size: 14))
                         
                         Text("DeskExtend")
-                            .font(.system(size: 24, weight: .bold))
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
                     }
                     
                     Text(appManager.isConnected ? "Connected to Pi" : "Waiting for connection...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.gray)
                 }
                 
                 Spacer()
@@ -76,11 +82,11 @@ struct HeaderView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(String(format: "%.2f Mbps", appManager.bitrate))
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.primary)
+                                .foregroundColor(.white)
                             
                             Text("bitrate")
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.gray)
                         }
                         
                         Divider()
@@ -89,24 +95,24 @@ struct HeaderView: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("\(appManager.fps) FPS")
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.primary)
+                                .foregroundColor(.white)
                             
                             Text("performance")
                                 .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(.gray)
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Color(nsColor: .controlColor))
-                    .cornerRadius(8)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(10)
                 }
             }
             .padding(.horizontal)
             .padding(.vertical, 16)
         }
-        .background(Color(nsColor: .controlBackgroundColor))
-        .borderTop()
+        .background(Color.white.opacity(0.02))
+        .overlay(Rectangle().frame(height: 1).foregroundColor(Color.white.opacity(0.05)), alignment: .bottom)
     }
 }
 
@@ -244,8 +250,9 @@ struct SettingsTabView: View {
 
 struct ConnectionTabView: View {
     @EnvironmentObject var appManager: AppManager
-    @State private var piAddress = ""
+    @State private var piAddressInput = ""
     @State private var piPort = "5900"
+    @State private var use60FPS = false
     
     var body: some View {
         ScrollView {
@@ -264,9 +271,9 @@ struct ConnectionTabView: View {
                     }
                 }
                 
-                GlassCard(title: "Pi Address", value: piAddress.isEmpty ? "Auto-detect" : piAddress) {
+                GlassCard(title: "Pi Address", value: piAddressInput.isEmpty ? "Auto-detect" : piAddressInput) {
                     VStack(spacing: 8) {
-                        TextField("e.g., 192.168.1.100", text: $piAddress)
+                        TextField("e.g., 192.168.1.100", text: $piAddressInput)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11, design: .monospaced))
                         
@@ -282,32 +289,76 @@ struct ConnectionTabView: View {
                     }
                 }
                 
-                GlassCard(title: "Network", value: "Local USB") {
+                GlassCard(title: "Performance Mode", value: use60FPS ? "60 FPS" : "30 FPS") {
                     HStack(spacing: 8) {
-                        Image(systemName: "bolt.fill")
-                            .foregroundColor(.orange)
-                        Text("Direct USB connection")
+                        Toggle("60 FPS Mode (requires Gigabit network)", isOn: $use60FPS)
+                            .font(.system(size: 11))
+                    }
+                }
+                
+                GlassCard(title: "Network", value: "TCP Stream") {
+                    HStack(spacing: 8) {
+                        Image(systemName: "network")
+                            .foregroundColor(.blue)
+                        Text("Hardware-accelerated H.264")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
                 }
                 
                 HStack(spacing: 12) {
-                    Button(action: {}) {
+                    Button(action: {
+                        let trimmed = piAddressInput.trimmingCharacters(in: .whitespaces)
+                        let port = Int(piPort) ?? 5900
+                        if use60FPS {
+                            appManager.connect60fps(to: trimmed, port: port)
+                        } else {
+                            appManager.connect(to: trimmed, port: port)
+                        }
+                    }) {
                         Label("Connect", systemImage: "bolt.horizontal.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     
-                    Button(action: { appManager.stop() }) {
+                    Button(action: { appManager.disconnect() }) {
                         Label("Disconnect", systemImage: "xmark.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .foregroundColor(.red)
                 }
-                
-                Spacer()
+
+                GlassCard(title: "Connection Logs", value: "Live") {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(appManager.logs.suffix(50).enumerated()), id: \.offset) { idx, line in
+                                    Text(line)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.primary)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .id(idx)
+                                }
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .onReceive(appManager.$logs) { _ in
+                                if !appManager.logs.isEmpty {
+                                    let lastIdx = appManager.logs.count - 1
+                                    withAnimation(.none) {
+                                        proxy.scrollTo(lastIdx, anchor: .bottom)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: 150)
+                    .background(Color.black.opacity(0.3))
+                    .cornerRadius(8)
+                }
             }
             .padding()
         }
@@ -354,12 +405,12 @@ struct GlassCard<Content: View>: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.gray)
                     
                     if !value.isEmpty {
                         Text(value)
                             .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .foregroundColor(.white)
                     }
                 }
                 
@@ -373,138 +424,24 @@ struct GlassCard<Content: View>: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(
                     LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color(nsColor: .controlColor).opacity(0.5),
-                            Color(nsColor: .controlColor).opacity(0.2)
-                        ]),
+                        colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
-                .background(Color.white.opacity(0.1))
+                .background(Color.black.opacity(0.4))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(
                     LinearGradient(
-                        gradient: Gradient(colors: [
-                            Color.white.opacity(0.3),
-                            Color.white.opacity(0.1)
-                        ]),
+                        colors: [Color.white.opacity(0.18), Color.white.opacity(0.06)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
                     lineWidth: 1
                 )
         )
-    }
-}
-
-struct MenuBarView: View {
-    @EnvironmentObject var appManager: AppManager
-    @EnvironmentObject var permissionManager: PermissionManager
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Circle()
-                    .fill(appManager.isConnected ? Color.green : Color.gray)
-                    .frame(width: 8, height: 8)
-                
-                Text(appManager.isConnected ? "Connected" : "Disconnected")
-                    .font(.system(size: 12, weight: .semibold))
-                
-                Spacer()
-            }
-            
-            Divider()
-            
-            if appManager.isConnected {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Bitrate")
-                            .font(.system(size: 11))
-                        Spacer()
-                        Text(String(format: "%.2f Mbps", appManager.bitrate))
-                            .font(.system(size: 11, design: .monospaced))
-                    }
-                    
-                    HStack {
-                        Text("FPS")
-                            .font(.system(size: 11))
-                        Spacer()
-                        Text("\(appManager.fps)")
-                            .font(.system(size: 11, design: .monospaced))
-                    }
-                    
-                    HStack {
-                        Text("Frames")
-                            .font(.system(size: 11))
-                        Spacer()
-                        Text("\(appManager.encodedFrames)")
-                            .font(.system(size: 11, design: .monospaced))
-                    }
-                    
-                    HStack {
-                        Text("Uptime")
-                            .font(.system(size: 11))
-                        Spacer()
-                        Text(formatUptime(appManager.uptime))
-                            .font(.system(size: 11, design: .monospaced))
-                    }
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No device connected")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    
-                    Text("Connect your Raspberry Pi to start streaming")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            
-            Divider()
-            
-            Button(action: {
-                if !appManager.windowIsOpen {
-                    NSApplication.shared.setActivationPolicy(.regular)
-                    DispatchQueue.main.async {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        appManager.shouldOpenWindow = true
-                    }
-                } else {
-                    DispatchQueue.main.async {
-                        NSApplication.shared.activate(ignoringOtherApps: true)
-                        if let mainWindow = NSApplication.shared.windows.first(where: { $0.identifier?.rawValue == "main" }) {
-                            mainWindow.makeKeyAndOrderFront(nil)
-                        }
-                    }
-                }
-            }) {
-                Label("Open DeskExtend", systemImage: "macwindow")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            
-            Button(action: {
-                if let delegate = NSApplication.shared.delegate as? AppDelegate {
-                    delegate.shouldAllowTermination = true
-                }
-                DispatchQueue.main.async {
-                    NSApplication.shared.terminate(nil)
-                    exit(0)
-                }
-            }) {
-                Label("Quit", systemImage: "power")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(12)
-        .frame(width: 220)
     }
 }
 
