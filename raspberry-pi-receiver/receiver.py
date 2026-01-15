@@ -5,6 +5,8 @@ import struct
 import subprocess
 import signal
 import sys
+import os
+import time
 from pathlib import Path
 
 class VideoReceiver:
@@ -13,7 +15,19 @@ class VideoReceiver:
         self.port = port
         self.sock = None
         self.gstreamer_process = None
+        self.browser_process = None
         self.running = False
+        self.connected = False
+    
+    def get_local_ip(self):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return '0.0.0.0'
         
     def setup_gstreamer_pipeline(self):
         pipeline = [
@@ -27,6 +41,57 @@ class VideoReceiver:
             'fullscreen-overlay=1'
         ]
         return pipeline
+    
+    def start_waiting_page(self):
+        try:
+            template_path = Path(__file__).parent / 'waiting.html'
+            if not template_path.exists():
+                print(f"Warning: {template_path} not found, skipping browser display")
+                return False
+            
+            local_ip = self.get_local_ip()
+            
+            with open(template_path, 'r') as f:
+                html_content = f.read()
+            
+            html_content = html_content.replace('{{IP_ADDRESS}}', local_ip)
+            html_content = html_content.replace('{{PORT}}', str(self.port))
+            
+            runtime_html = Path(__file__).parent / 'waiting_runtime.html'
+            with open(runtime_html, 'w') as f:
+                f.write(html_content)
+            
+            self.browser_process = subprocess.Popen(
+                [
+                    'chromium-browser',
+                    '--kiosk',
+                    '--noerrdialogs',
+                    '--disable-infobars',
+                    '--no-first-run',
+                    '--disable-session-crashed-bubble',
+                    '--disable-features=TranslateUI',
+                    f'file://{runtime_html.absolute()}'
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print(f"Waiting page displayed - Connect to {local_ip}:{self.port}")
+            return True
+        except Exception as e:
+            print(f"Failed to start browser: {e}")
+            return False
+    
+    def stop_waiting_page(self):
+        if self.browser_process:
+            self.browser_process.terminate()
+            try:
+                self.browser_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                self.browser_process.kill()
+            self.browser_process = None
+            subprocess.run(['pkill', '-f', 'chromium-browser'], 
+                         stdout=subprocess.DEVNULL, 
+                         stderr=subprocess.DEVNULL)
     
     def start_gstreamer(self):
         try:
@@ -56,12 +121,34 @@ class VideoReceiver:
             print(f"Failed to bind socket: {e}")
             return False
     
-    def receive_and_decode(self):
+    def wait_for_connection(self):
+        print("Waiting for initial connection from Mac...")
+        start_time = time.time()
+        
+        while not self.connected and self.running:
+            try:
+                data, addr = self.sock.recvfrom(65535)
+                if data and len(data) > 0:
+                    print(f"Connection established from {addr}")
+                    self.connected = True
+                    return data, addr
+            except socket.timeout:
+                if time.time() - start_time > 300:
+                    print("Connection timeout after 5 minutes")
+                    return None, None
+                continue
+            except Exception as e:
+                print(f"Error waiting for connection: {e}")
+                return None, None
+        
+        return None, None
+    
+    def receive_and_decode(self, initial_data=None):
         self.running = True
-        buffer = b''
+        buffer = initial_data if initial_data else b''
         expected_size = 0
         
-        print("Waiting for video stream from Mac...")
+        print("Processing video stream...")
         
         while self.running:
             try:
@@ -101,6 +188,8 @@ class VideoReceiver:
     def stop(self):
         self.running = False
         
+        self.stop_waiting_page()
+        
         if self.gstreamer_process:
             self.gstreamer_process.terminate()
             try:
@@ -124,14 +213,26 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    receiver.start_waiting_page()
+    
     if not receiver.connect_to_mac():
+        receiver.stop()
         sys.exit(1)
     
+    initial_data, addr = receiver.wait_for_connection()
+    
+    if not initial_data:
+        receiver.stop()
+        sys.exit(1)
+    
+    receiver.stop_waiting_page()
+    
     if not receiver.start_gstreamer():
+        receiver.stop()
         sys.exit(1)
     
     try:
-        receiver.receive_and_decode()
+        receiver.receive_and_decode(initial_data)
     except KeyboardInterrupt:
         pass
     finally:

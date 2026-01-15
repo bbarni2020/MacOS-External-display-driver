@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MacOS-External-display-driver}/macos-sender",
+            "name": "Debug VirtualDisplaySender (macos-sender)",
+            "target": "VirtualDisplaySender",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug VirtualDisplaySender (macos-sender)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:MacOS-External-display-driver}/macos-sender",
+            "name": "Release VirtualDisplaySender (macos-sender)",
+            "target": "VirtualDisplaySender",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release VirtualDisplaySender (macos-sender)"
+        }
+    ]
+}

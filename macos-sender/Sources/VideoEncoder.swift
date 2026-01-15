@@ -7,7 +7,7 @@ class VideoEncoder {
     private let config: DisplayConfig
     private var compressionSession: VTCompressionSession?
     private let outputCallback: (Data) -> Void
-    private var frameCount: Int64 = 0
+    private(set) var frameCount: Int = 0
     
     init(config: DisplayConfig, outputCallback: @escaping (Data) -> Void) {
         self.config = config
@@ -82,7 +82,7 @@ class VideoEncoder {
         guard let session = compressionSession else { return }
         
         let presentationTimestamp = CMTime(
-            value: frameCount,
+            value: Int64(frameCount),
             timescale: CMTimeScale(config.fps)
         )
         

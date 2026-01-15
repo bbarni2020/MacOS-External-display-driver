@@ -1,21 +1,16 @@
 import Foundation
 import AppKit
 
-@main
-struct VirtualDisplayApp {
-    static func main() {
-        let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
-        
-        let delegate = AppDelegate()
-        app.delegate = delegate
-        
-        print("Virtual Display Sender starting...")
-        print("Target resolution: 1920x1080 @ 30 FPS")
-        
-        app.run()
-    }
-}
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+
+let delegate = AppDelegate()
+app.delegate = delegate
+
+print("Virtual Display Sender starting...")
+print("Target resolution: 1920x1080 @ 30 FPS")
+
+app.run()
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var virtualDisplay: VirtualDisplay?
@@ -68,17 +63,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             stats.piAddress = piAddress ?? (menuBarController?.isConnected == true ? transport.connectedAddress : "Not connected")
         }
         
-        if let config = virtualDisplay?.config {
-            stats.fps = config.fps
-            stats.resolution = "\(config.width)×\(config.height)"
+        if let display = virtualDisplay {
+            stats.fps = display.currentConfig.fps
+            stats.resolution = "\(display.currentConfig.width)×\(display.currentConfig.height)"
+            
+            if let encoder = display.videoEncoder {
+                stats.encodedFrames = encoder.frameCount
+            }
         }
         
         if let start = startTime {
             stats.uptime = Date().timeIntervalSince(start)
-        }
-        
-        if let encoder = virtualDisplay?.encoder {
-            stats.encodedFrames = encoder.frameCount
         }
         
         menuBarController?.stats = stats
