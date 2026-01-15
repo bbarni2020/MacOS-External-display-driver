@@ -28,6 +28,21 @@ class VideoReceiver:
             return ip
         except Exception:
             return '0.0.0.0'
+    
+    def find_browser(self):
+        browsers = [
+            'firefox',
+            'chromium-browser',
+            'chromium',
+            'epiphany',
+            'midori'
+        ]
+        
+        for browser in browsers:
+            if subprocess.run(['which', browser], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                return browser
+        
+        return None
         
     def setup_gstreamer_pipeline(self):
         pipeline = [
@@ -49,6 +64,11 @@ class VideoReceiver:
                 print(f"Warning: {template_path} not found, skipping browser display")
                 return False
             
+            browser = self.find_browser()
+            if not browser:
+                print("Warning: No compatible browser found, skipping waiting page")
+                return False
+            
             local_ip = self.get_local_ip()
             
             with open(template_path, 'r') as f:
@@ -61,21 +81,21 @@ class VideoReceiver:
             with open(runtime_html, 'w') as f:
                 f.write(html_content)
             
+            args = [browser]
+            
+            if browser == 'firefox':
+                args.extend(['--new-window', '--fullscreen', '--kiosk'])
+            else:
+                args.extend(['--kiosk', '--noerrdialogs', '--disable-infobars', '--no-first-run', '--disable-session-crashed-bubble', '--disable-features=TranslateUI'])
+            
+            args.append(f'file://{runtime_html.absolute()}')
+            
             self.browser_process = subprocess.Popen(
-                [
-                    'chromium-browser',
-                    '--kiosk',
-                    '--noerrdialogs',
-                    '--disable-infobars',
-                    '--no-first-run',
-                    '--disable-session-crashed-bubble',
-                    '--disable-features=TranslateUI',
-                    f'file://{runtime_html.absolute()}'
-                ],
+                args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            print(f"Waiting page displayed - Connect to {local_ip}:{self.port}")
+            print(f"Waiting page displayed using {browser} - Connect to {local_ip}:{self.port}")
             return True
         except Exception as e:
             print(f"Failed to start browser: {e}")
