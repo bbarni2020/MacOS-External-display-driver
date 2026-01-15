@@ -45,17 +45,15 @@ class VideoReceiver:
         return None
         
     def setup_gstreamer_pipeline(self):
-        pipeline = [
+        return [
             'gst-launch-1.0',
             '-v',
             'fdsrc', 'fd=0',
             '!', 'h264parse',
-            '!', 'v4l2h264dec',
-            '!', 'video/x-raw,width=1920,height=1080',
-            '!', 'kmssink', 'connector-id=32', 'plane-id=31',
-            'fullscreen-overlay=1'
+            '!', 'avdec_h264',
+            '!', 'videoconvert',
+            '!', 'autovideosink', 'sync=false'
         ]
-        return pipeline
     
     def start_waiting_page(self):
         try:
@@ -117,12 +115,15 @@ class VideoReceiver:
         try:
             pipeline = self.setup_gstreamer_pipeline()
             print(f"Starting GStreamer: {' '.join(pipeline)}")
-            
+            env = os.environ.copy()
+            if 'DISPLAY' not in env:
+                env['DISPLAY'] = ':0'
             self.gstreamer_process = subprocess.Popen(
                 pipeline,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                env=env
             )
             print("GStreamer pipeline started")
             return True
@@ -190,6 +191,9 @@ class VideoReceiver:
                                 self.gstreamer_process.stdin.flush()
                             except BrokenPipeError:
                                 print("GStreamer pipe broken, restarting...")
+                                self.start_gstreamer()
+                            except Exception as e:
+                                print(f"GStreamer write error: {e}")
                                 self.start_gstreamer()
                     else:
                         break
