@@ -96,21 +96,9 @@ class VideoReceiver:
     def show_firefox_kiosk(self):
         if not self.start_firefox_kiosk():
             return
-        if self.has_wmctrl():
-            try:
-                subprocess.run(['wmctrl', '-r', 'DeskExtend - Waiting for Connection', '-b', 'remove,hidden'], timeout=1)
-                subprocess.run(['wmctrl', '-a', 'DeskExtend - Waiting for Connection'], timeout=1)
-            except Exception:
-                pass
 
     def hide_firefox_kiosk(self):
         if self.firefox_process and self.firefox_process.poll() is None:
-            if self.has_wmctrl():
-                try:
-                    subprocess.run(['wmctrl', '-r', 'DeskExtend - Waiting for Connection', '-b', 'add,hidden'], timeout=1)
-                    return
-                except Exception:
-                    pass
             try:
                 self.firefox_process.terminate()
                 try:
@@ -289,6 +277,7 @@ class VideoReceiver:
                 if self.decoder_process.poll() is None:
                     self.decoder_type = pipeline_info['name']
                     logger.info(f"Decoder started: {self.decoder_type}")
+                    self.apply_wmctrl_fullscreen()
                     threading.Thread(target=self.monitor_decoder_errors, daemon=True).start()
                     return True
                 else:
@@ -304,6 +293,21 @@ class VideoReceiver:
         
         logger.error("All decoder pipelines failed")
         return False
+
+    def apply_wmctrl_fullscreen(self):
+        if not self.has_wmctrl():
+            return
+        window_names = [
+            'vaapisink',
+            'autovideosink',
+            'gst-launch-1.0'
+        ]
+        for name in window_names:
+            try:
+                subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1)
+                return
+            except Exception:
+                continue
     
     def monitor_decoder_errors(self):
         if not self.decoder_process or not self.decoder_process.stderr:

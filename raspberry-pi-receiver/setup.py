@@ -18,6 +18,7 @@ class RaspberryPiSetup:
             'gstreamer1.0-vaapi',
             'libgstreamer-ocl-1.0-0',
             'gstreamer1.0-nice',
+            'wmctrl',
             'python3-gi',
             'python3-dev',
             'libgirepository1.0-dev',
