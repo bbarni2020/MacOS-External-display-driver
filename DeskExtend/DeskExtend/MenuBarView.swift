@@ -31,6 +31,20 @@ struct MenuBarView: View {
             
             Divider()
             
+            Button(action: {
+                appManager.togglePreview()
+            }) {
+                HStack {
+                    Image(systemName: appManager.showPreview ? "eye.slash" : "eye")
+                    Text(appManager.showPreview ? "Hide Preview" : "Show Preview")
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            
+            Divider()
+            
             if appManager.isConnected {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
