@@ -68,7 +68,7 @@ class VideoReceiver:
                 '!', 'h264parse',
                 '!', 'v4l2h264dec', 'capture-io-mode=mmap',
                 '!', 'videoconvert',
-                '!', 'gtksink', 'fullscreen=true', 'sync=false'
+                '!', 'autovideosink', 'fullscreen=true', 'sync=false'
             ]
         })
 
@@ -107,7 +107,7 @@ class VideoReceiver:
                 '!', 'h264parse',
                 '!', 'avdec_h264', 'max-threads=4',
                 '!', 'videoconvert',
-                '!', 'gtksink', 'fullscreen=true', 'sync=false'
+                '!', 'autovideosink', 'sync=false'
             ]
         })
 
