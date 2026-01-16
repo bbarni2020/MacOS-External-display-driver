@@ -9,6 +9,8 @@ import threading
 import time
 import os
 import logging
+import serial
+import glob
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,10 +19,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class VideoReceiver:
-    def __init__(self, host='0.0.0.0', port=5900):
+    def __init__(self, host='0.0.0.0', port=5900, mode='network', usb_device=None):
         self.host = host
         self.port = port
+        self.mode = mode
+        self.usb_device = usb_device or self.detect_usb_device()
         self.sock = None
+        self.serial_conn = None
         self.decoder_process = None
         self.running = False
         self.frame_count = 0
@@ -28,6 +33,23 @@ class VideoReceiver:
         self.current_fps = 0
         self.decoder_type = None
         self.bytes_received = 0
+    
+    @staticmethod
+    def detect_usb_device():
+        patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*']
+        for pattern in patterns:
+            devices = glob.glob(pattern)
+            if devices:
+                return devices[0]
+        return None
+    
+    @staticmethod
+    def detect_all_devices():
+        devices = []
+        patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*']
+        for pattern in patterns:
+            devices.extend(glob.glob(pattern))
+        return devices
     
     def detect_decoder_pipeline(self):
         pipelines = []
@@ -163,6 +185,32 @@ class VideoReceiver:
             logger.error(f"Socket bind failed: {e}")
             return False
     
+    def open_usb(self):
+        if not self.usb_device:
+            logger.error("No USB device detected")
+            return False
+        
+        try:
+            self.serial_conn = serial.Serial(
+                port=self.usb_device,
+                baudrate=115200,
+                timeout=1.0,
+                write_timeout=1.0
+            )
+            logger.info(f"Opened USB device: {self.usb_device}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to open USB device: {e}")
+            return False
+    
+    def close_usb(self):
+        if self.serial_conn:
+            try:
+                self.serial_conn.close()
+            except:
+                pass
+            self.serial_conn = None
+    
     def update_fps(self):
         self.frame_count += 1
         now = time.time()
@@ -175,17 +223,35 @@ class VideoReceiver:
             self.bytes_received = 0
             self.last_fps_time = now
     
+    def read_from_connection(self, conn, chunk_size=262144):
+        """Read from socket or serial connection"""
+        try:
+            if isinstance(conn, serial.Serial):
+                return conn.read(min(chunk_size, 4096)) if conn.in_waiting else b''
+            else:
+                return conn.recv(chunk_size)
+        except (socket.timeout, serial.SerialException):
+            return b''
+        except Exception as e:
+            logger.error(f"Read error: {e}")
+            return None
+    
     def process_stream(self, conn):
         logger.info("Processing video stream...")
         
         buffer = b''
+        is_serial = isinstance(conn, serial.Serial)
         
         while self.running:
             try:
-                chunk = conn.recv(262144)
-                if not chunk:
-                    logger.info("Connection closed")
+                chunk = self.read_from_connection(conn)
+                if chunk is None:
                     break
+                if not chunk:
+                    if is_serial:
+                        import time
+                        time.sleep(0.001)
+                    continue
                 
                 buffer += chunk
                 self.bytes_received += len(chunk)
@@ -216,21 +282,170 @@ class VideoReceiver:
                             logger.error(f"Decoder write error: {e}")
                             return False
                     
-            except socket.timeout:
-                continue
+            except socket.error as e:
+                logger.error(f"Socket error: {e}")
+                break
             except Exception as e:
-                logger.error(f"Receive error: {e}")
+                logger.error(f"Stream error: {e}")
                 break
         
         return True
     
+    
+    def run_usb(self):
+        self.running = True
+        
+        logger.info(f"Starting USB mode on device: {self.usb_device}")
+        
+        while self.running:
+            try:
+                if not self.open_usb():
+                    logger.warning("Retrying USB connection in 3 seconds...")
+                    time.sleep(3)
+                    continue
+                
+                if not self.start_decoder():
+                    self.close_usb()
+                    time.sleep(3)
+                    continue
+                
+                logger.info("USB connection established")
+                self.frame_count = 0
+                self.bytes_received = 0
+                self.last_fps_time = time.time()
+                
+                self.process_stream(self.serial_conn)
+                
+                self.close_usb()
+                
+                if self.decoder_process:
+                    self.decoder_process.terminate()
+                    try:
+                        self.decoder_process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        self.decoder_process.kill()
+                    self.decoder_process = None
+                
+                logger.info("USB connection closed, waiting for next connection...")
+                time.sleep(1)
+                
+            except Exception as e:
+                if self.running:
+                    logger.error(f"USB error: {e}")
+                    self.close_usb()
+                    time.sleep(3)
+    
+    def run_hybrid(self):
+        """Run hybrid mode: try USB first, fallback to network"""
+        self.running = True
+        
+        logger.info("Starting hybrid mode (USB priority with network fallback)")
+        
+        network_thread = None
+        usb_active = False
+        
+        while self.running:
+            try:
+                if self.usb_device and not usb_active:
+                    logger.info(f"Attempting USB connection: {self.usb_device}")
+                    if self.open_usb():
+                        usb_active = True
+                        if not self.start_decoder():
+                            self.close_usb()
+                            usb_active = False
+                        else:
+                            logger.info("USB connected, processing stream...")
+                            self.frame_count = 0
+                            self.bytes_received = 0
+                            self.last_fps_time = time.time()
+                            
+                            usb_success = self.process_stream(self.serial_conn)
+                            self.close_usb()
+                            usb_active = False
+                            
+                            if self.decoder_process:
+                                self.decoder_process.terminate()
+                                try:
+                                    self.decoder_process.wait(timeout=3)
+                                except subprocess.TimeoutExpired:
+                                    self.decoder_process.kill()
+                                self.decoder_process = None
+                            
+                            logger.info("USB connection closed")
+                            time.sleep(1)
+                            continue
+                    else:
+                        logger.warning("USB connection failed, falling back to network...")
+                
+                logger.info(f"Listening on network {self.host}:{self.port}")
+                if not self.bind_socket():
+                    time.sleep(3)
+                    continue
+                
+                logger.info("Waiting for network connection...")
+                self.sock.settimeout(2.0)
+                
+                try:
+                    conn, addr = self.sock.accept()
+                    logger.info(f"Connected from {addr}")
+                    
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+                    
+                    if not self.start_decoder():
+                        conn.close()
+                        self.sock.close()
+                        continue
+                    
+                    self.frame_count = 0
+                    self.bytes_received = 0
+                    self.last_fps_time = time.time()
+                    
+                    self.process_stream(conn)
+                    
+                    conn.close()
+                    
+                    if self.decoder_process:
+                        self.decoder_process.terminate()
+                        try:
+                            self.decoder_process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            self.decoder_process.kill()
+                        self.decoder_process = None
+                    
+                    self.sock.close()
+                    logger.info("Network connection closed")
+                    
+                except socket.timeout:
+                    if self.usb_device:
+                        logger.info("No network connection, retrying USB...")
+                    continue
+                    
+            except Exception as e:
+                if self.running:
+                    logger.error(f"Hybrid mode error: {e}")
+                    if self.sock:
+                        self.sock.close()
+                    self.close_usb()
+                    time.sleep(3)
+    
     def run(self):
+        self.running = True
+        
+        if self.mode == 'usb':
+            self.run_usb()
+        elif self.mode == 'hybrid':
+            self.run_hybrid()
+        else:
+            self.run_network()
+    
+    def run_network(self):
         self.running = True
         
         if not self.bind_socket():
             return
         
-        logger.info("Waiting for connection...")
+        logger.info("Waiting for network connection...")
         
         while self.running:
             try:
@@ -260,7 +475,7 @@ class VideoReceiver:
                         self.decoder_process.kill()
                     self.decoder_process = None
                 
-                logger.info("Connection closed, waiting for next connection...")
+                logger.info("Network connection closed, waiting for next connection...")
                 
             except socket.timeout:
                 continue
@@ -293,10 +508,42 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 if __name__ == '__main__':
-    receiver = VideoReceiver()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='macOS External Display Receiver')
+    parser.add_argument('--mode', choices=['network', 'usb', 'hybrid'], default='network',
+                        help='Connection mode: network (TCP), usb (serial), or hybrid (auto-failover)')
+    parser.add_argument('--host', default='0.0.0.0', help='Network bind address (network/hybrid mode)')
+    parser.add_argument('--port', type=int, default=5900, help='Network port (network/hybrid mode)')
+    parser.add_argument('--usb-device', help='USB serial device path (auto-detected if not specified)')
+    
+    args = parser.parse_args()
+    
+    if args.mode in ['usb', 'hybrid'] and not args.usb_device:
+        usb_device = VideoReceiver.detect_usb_device()
+        if usb_device:
+            logger.info(f"Auto-detected USB device: {usb_device}")
+        else:
+            logger.warning("USB mode selected but no device detected. Available devices:")
+            devices = VideoReceiver.detect_all_devices()
+            if devices:
+                for dev in devices:
+                    logger.info(f"  {dev}")
+            if args.mode == 'usb':
+                logger.error("No USB device found for USB mode")
+                sys.exit(1)
+    else:
+        usb_device = args.usb_device
+    
+    receiver = VideoReceiver(mode=args.mode, host=args.host, port=args.port, usb_device=usb_device)
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    logger.info("Video receiver starting on 0.0.0.0:5900")
+    logger.info(f"Video receiver starting in {args.mode} mode")
+    if args.mode in ['network', 'hybrid']:
+        logger.info(f"  Network: {args.host}:{args.port}")
+    if args.mode in ['usb', 'hybrid']:
+        logger.info(f"  USB device: {usb_device or 'auto-detect'}")
+    
     receiver.run()
