@@ -107,7 +107,7 @@ class VideoReceiver:
                 '!', 'h264parse',
                 '!', 'avdec_h264', 'max-threads=4',
                 '!', 'videoconvert',
-                '!', 'autovideosink', 'sync=false'
+                '!', 'autovideosink', 'fullscreen=true', 'sync=false'
             ]
         })
 
