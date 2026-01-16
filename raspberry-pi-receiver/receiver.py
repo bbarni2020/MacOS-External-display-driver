@@ -30,9 +30,26 @@ class VideoReceiver:
         self.bytes_received = 0
     
     def detect_decoder_pipeline(self):
-        pipelines = [
-            {
-                'name': 'Hardware MMAL + KMS',
+        pipelines = []
+
+        has_v4l2_sink = os.path.exists('/dev/video0') and os.access('/dev/video0', os.W_OK)
+
+        pipelines.append({
+            'name': 'Hardware v4l2 + autovideosink',
+            'cmd': [
+                'gst-launch-1.0', '-e',
+                'fdsrc', 'fd=0',
+                '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
+                '!', 'h264parse',
+                '!', 'v4l2h264dec', 'capture-io-mode=mmap',
+                '!', 'videoconvert',
+                '!', 'autovideosink', 'sync=false'
+            ]
+        })
+
+        if has_v4l2_sink:
+            pipelines.append({
+                'name': 'Hardware MMAL + KMS (/dev/video0)',
                 'cmd': [
                     'gst-launch-1.0', '-e',
                     'fdsrc', 'fd=0',
@@ -41,45 +58,34 @@ class VideoReceiver:
                     '!', 'v4l2h264dec',
                     '!', 'v4l2sink', 'device=/dev/video0', 'sync=false'
                 ]
-            },
-            {
-                'name': 'Hardware v4l2 + autovideosink',
-                'cmd': [
-                    'gst-launch-1.0', '-e',
-                    'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
-                    '!', 'h264parse',
-                    '!', 'v4l2h264dec', 'capture-io-mode=mmap',
-                    '!', 'videoconvert',
-                    '!', 'autovideosink', 'sync=false'
-                ]
-            },
-            {
-                'name': 'Hardware v4l2 + gtksink',
-                'cmd': [
-                    'gst-launch-1.0', '-e',
-                    'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
-                    '!', 'h264parse',
-                    '!', 'v4l2h264dec',
-                    '!', 'videoconvert',
-                    '!', 'gtksink', 'sync=false'
-                ]
-            },
-            {
-                'name': 'Software avdec + autovideosink',
-                'cmd': [
-                    'gst-launch-1.0', '-e',
-                    'fdsrc', 'fd=0',
-                    '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
-                    '!', 'h264parse',
-                    '!', 'avdec_h264', 'max-threads=4',
-                    '!', 'videoconvert',
-                    '!', 'autovideosink', 'sync=false'
-                ]
-            }
-        ]
-        
+            })
+
+        pipelines.append({
+            'name': 'Hardware v4l2 + gtksink',
+            'cmd': [
+                'gst-launch-1.0', '-e',
+                'fdsrc', 'fd=0',
+                '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                '!', 'h264parse',
+                '!', 'v4l2h264dec',
+                '!', 'videoconvert',
+                '!', 'gtksink', 'sync=false'
+            ]
+        })
+
+        pipelines.append({
+            'name': 'Software avdec + autovideosink',
+            'cmd': [
+                'gst-launch-1.0', '-e',
+                'fdsrc', 'fd=0',
+                '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
+                '!', 'h264parse',
+                '!', 'avdec_h264', 'max-threads=4',
+                '!', 'videoconvert',
+                '!', 'autovideosink', 'sync=false'
+            ]
+        })
+
         return pipelines
     
     def start_decoder(self):
