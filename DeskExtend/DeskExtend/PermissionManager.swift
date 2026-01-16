@@ -26,15 +26,8 @@ final class PermissionManager: ObservableObject {
     
     func requestPermissions() {
         showPermissionAlert = true
-        Task { @MainActor in
-            do {
-                _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-                self.hasScreenRecordingPermission = true
-                self.permissionStatus = "Granted"
-            } catch {
-                self.hasScreenRecordingPermission = false
-                self.permissionStatus = "Permission denied. Enable in System Settings > Privacy & Security > Screen Recording"
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.checkPermissions()
         }
     }
     

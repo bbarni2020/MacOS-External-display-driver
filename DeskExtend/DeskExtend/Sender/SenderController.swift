@@ -2,8 +2,9 @@ import Foundation
 import AppKit
 
 class SenderController {
-    private var transport: NetworkTransport?
-    private var virtualDisplay: VirtualDisplay?
+    private var transport: HybridTransport?
+    private var screenCaptureEngine: ScreenCaptureEngine?
+    private var videoEncoder: VideoEncoder?
     private weak var appManager: AppManager?
     private var statsTimer: Timer?
     
@@ -11,22 +12,26 @@ class SenderController {
         self.appManager = appManager
     }
     
-    func connect(host: String, port: Int) {
+    func connect(request: ConnectionRequest) {
         stop()
         guard #available(macOS 13.0, *) else {
             appManager?.appendLog("macOS 13+ required for ScreenCaptureKit")
             return
         }
-        let transport = NetworkTransport(
+        guard let targetDisplay = DisplayManager.shared.display(at: request.displayIndex) ?? DisplayManager.shared.mainDisplay() else {
+            appManager?.appendLog("Target display not found")
+            return
+        }
+        let transport = HybridTransport(
             statusCallback: { [weak self] connected, address in
                 self?.appManager?.updateConnectionStatus(
                     connected: connected,
                     address: address,
                     bitrate: self?.transport?.currentBitrate ?? 0,
-                    fps: self?.virtualDisplay?.currentConfig.fps ?? 0,
-                    resolution: self?.resolutionString() ?? "",
-                    encodedFrames: self?.virtualDisplay?.videoEncoder?.frameCount ?? 0,
-                    droppedFrames: 0,
+                    fps: request.config.fps,
+                    resolution: self?.resolutionString(for: request.config) ?? "",
+                    encodedFrames: self?.videoEncoder?.frameCount ?? 0,
+                    droppedFrames: self?.videoEncoder?.droppedFrames ?? 0,
                     uptime: self?.appManager?.uptime ?? 0
                 )
             },
@@ -36,68 +41,42 @@ class SenderController {
         )
         self.transport = transport
         
-        let config = DisplayConfig(width: 1920, height: 1080, fps: 30, bitrate: 8_000_000)
-        let display = VirtualDisplay(config: config, transport: transport)
-        virtualDisplay = display
+        // Connect transport based on mode
+        switch request.mode {
+        case .usb:
+            transport.connectUSB(devicePath: request.usbDevice)
+        case .network:
+            transport.connectNetwork(host: request.host, port: UInt16(request.port))
+        case .hybrid:
+            transport.connectHybrid(usbPath: request.usbDevice, networkHost: request.host, port: UInt16(request.port))
+        }
+        
+        // Create video encoder
+        let encoder = VideoEncoder(config: request.config) { [weak self] data in
+            self?.transport?.send(data: data)
+        }
+        self.videoEncoder = encoder
+        
+        // Create screen capture engine
+        let captureEngine = ScreenCaptureEngine(config: request.config, targetDisplay: targetDisplay, encoder: encoder)
+        self.screenCaptureEngine = captureEngine
         
         do {
-            try display.start()
+            try captureEngine.start()
+            appManager?.appendLog("Screen capture started")
         } catch {
             appManager?.appendLog("Failed to start capture: \(error.localizedDescription)")
             stop()
             return
         }
-        
-        transport.connect(to: host, port: UInt16(port))
-        startStatsTimer()
-    }
-    
-    func connect60fps(host: String, port: Int) {
-        stop()
-        guard #available(macOS 13.0, *) else {
-            appManager?.appendLog("macOS 13+ required for ScreenCaptureKit")
-            return
-        }
-        let transport = NetworkTransport(
-            statusCallback: { [weak self] connected, address in
-                self?.appManager?.updateConnectionStatus(
-                    connected: connected,
-                    address: address,
-                    bitrate: self?.transport?.currentBitrate ?? 0,
-                    fps: self?.virtualDisplay?.currentConfig.fps ?? 0,
-                    resolution: self?.resolutionString() ?? "",
-                    encodedFrames: self?.virtualDisplay?.videoEncoder?.frameCount ?? 0,
-                    droppedFrames: 0,
-                    uptime: self?.appManager?.uptime ?? 0
-                )
-            },
-            logCallback: { [weak self] line in
-                self?.appManager?.appendLog(line)
-            }
-        )
-        self.transport = transport
-        
-        let config = DisplayConfig.fullHD60
-        let display = VirtualDisplay(config: config, transport: transport)
-        virtualDisplay = display
-        
-        do {
-            try display.start()
-        } catch {
-            appManager?.appendLog("Failed to start capture: \(error.localizedDescription)")
-            stop()
-            return
-        }
-        
-        transport.connect(to: host, port: UInt16(port))
         startStatsTimer()
     }
     
     func stop() {
         statsTimer?.invalidate()
         statsTimer = nil
-        virtualDisplay?.stop()
-        virtualDisplay = nil
+        screenCaptureEngine = nil
+        videoEncoder = nil
         transport?.stop()
         transport = nil
     }
@@ -110,19 +89,21 @@ class SenderController {
                 connected: self.transport != nil,
                 address: self.transport?.connectedAddress ?? "Not connected",
                 bitrate: self.transport?.currentBitrate ?? 0,
-                fps: self.virtualDisplay?.currentConfig.fps ?? 0,
+                fps: self.videoEncoder?.config.fps ?? 0,
                 resolution: self.resolutionString(),
-                encodedFrames: self.virtualDisplay?.videoEncoder?.frameCount ?? 0,
-                droppedFrames: 0,
+                encodedFrames: self.videoEncoder?.frameCount ?? 0,
+                droppedFrames: self.videoEncoder?.droppedFrames ?? 0,
                 uptime: self.appManager?.uptime ?? 0
             )
         }
     }
     
     private func resolutionString() -> String {
-        if let cfg = virtualDisplay?.currentConfig {
-            return "\(cfg.width)×\(cfg.height)"
-        }
-        return ""
+        guard let cfg = videoEncoder?.config else { return "" }
+        return "\(cfg.width)×\(cfg.height)"
+    }
+    
+    private func resolutionString(for config: DisplayConfig) -> String {
+        return "\(config.width)×\(config.height)"
     }
 }

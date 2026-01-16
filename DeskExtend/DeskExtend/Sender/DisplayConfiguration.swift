@@ -2,7 +2,6 @@ import Foundation
 import CoreGraphics
 
 struct DisplayConfiguration: Codable {
-    var geometry: VirtualDisplayGeometry
     var isEnabled: Bool = true
     var captureDisplayIndex: Int = 0
     var targetFPS: Int = 60
@@ -11,16 +10,16 @@ struct DisplayConfiguration: Codable {
     
     func save(to defaults: UserDefaults = .standard) {
         if let encoded = try? JSONEncoder().encode(self) {
-            defaults.set(encoded, forKey: "virtualDisplayConfig")
-            defaults.set(lastModified, forKey: "virtualDisplayConfigModified")
+            defaults.set(encoded, forKey: "displayConfig")
+            defaults.set(lastModified, forKey: "displayConfigModified")
         }
     }
     
     static func load(from defaults: UserDefaults = .standard) -> DisplayConfiguration {
-        if let data = defaults.data(forKey: "virtualDisplayConfig"),
+        if let data = defaults.data(forKey: "displayConfig"),
            let decoded = try? JSONDecoder().decode(DisplayConfiguration.self, from: data) {
             return decoded
         }
-        return DisplayConfiguration(geometry: VirtualDisplayGeometry())
+        return DisplayConfiguration()
     }
 }

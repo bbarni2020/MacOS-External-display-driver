@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct DashboardView: View {
     @EnvironmentObject var appManager: AppManager
@@ -27,20 +28,12 @@ struct DashboardView: View {
                         }
                         .tag(0)
                     
-                    SettingsTabView()
-                        .environmentObject(appManager)
-                        .environmentObject(permissionManager)
-                        .tabItem {
-                            Label("Settings", systemImage: "gear")
-                        }
-                        .tag(1)
-                    
                     ConnectionTabView()
                         .environmentObject(appManager)
                         .tabItem {
                             Label("Connection", systemImage: "wifi")
                         }
-                        .tag(2)
+                        .tag(1)
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
@@ -84,9 +77,9 @@ struct HeaderView: View {
                                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                                 .foregroundColor(.white)
                             
-                            Text("bitrate")
-                                .font(.system(size: 10))
-                                .foregroundColor(.gray)
+                                            .textSelection(.enabled)
+                                            .lineLimit(nil)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         
                         Divider()
@@ -119,6 +112,9 @@ struct HeaderView: View {
 struct DashboardTabView: View {
     @EnvironmentObject var appManager: AppManager
     @EnvironmentObject var permissionManager: PermissionManager
+    
+    let resolutions = ["1920×1080", "1280×720", "1024×768"]
+    let fpsModes = ["24", "30", "60"]
     
     var body: some View {
         ScrollView {
@@ -162,86 +158,65 @@ struct DashboardTabView: View {
                             }
                         }
                     }
-                }
-            }
-            .padding()
-        }
-    }
-}
-
-struct SettingsTabView: View {
-    @EnvironmentObject var appManager: AppManager
-    @EnvironmentObject var permissionManager: PermissionManager
-    @State private var selectedResolution = 0
-    @State private var selectedFPS = 1
-    @State private var bitrateValue = 8.0
-    
-    let resolutions = ["1920×1080", "1280×720", "1024×768"]
-    let fpsModes = ["24", "30", "60"]
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Video Settings")
-                        .font(.system(size: 16, weight: .semibold))
                     
-                    GlassCard(title: "Resolution", value: resolutions[selectedResolution]) {
-                        Picker("", selection: $selectedResolution) {
-                            ForEach(0..<resolutions.count, id: \.self) { i in
-                                Text(resolutions[i]).tag(i)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    
-                    GlassCard(title: "Frame Rate", value: "\(fpsModes[selectedFPS]) FPS") {
-                        Picker("", selection: $selectedFPS) {
-                            ForEach(0..<fpsModes.count, id: \.self) { i in
-                                Text(fpsModes[i]).tag(i)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    
-                    GlassCard(title: "Bitrate", value: String(format: "%.1f Mbps", bitrateValue)) {
-                        VStack(spacing: 8) {
-                            Slider(value: $bitrateValue, in: 1...15, step: 0.5)
-                            HStack {
-                                Text("Low")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Text("High")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("System")
-                        .font(.system(size: 16, weight: .semibold))
-                    
-                    GlassCard(title: "Permissions", value: permissionManager.permissionStatus) {
-                        HStack(spacing: 8) {
-                            if permissionManager.hasScreenRecordingPermission {
-                                Label("Granted", systemImage: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: 11))
-                            } else {
-                                Button("Grant Access") {
-                                    permissionManager.openSystemSettings()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Video Settings")
+                            .font(.system(size: 16, weight: .semibold))
+                        
+                        let resolutionLabel = resolutions.indices.contains(appManager.selectedResolutionIndex) ? resolutions[appManager.selectedResolutionIndex] : resolutions.first ?? ""
+                        GlassCard(title: "Resolution", value: resolutionLabel) {
+                            Picker("", selection: $appManager.selectedResolutionIndex) {
+                                ForEach(0..<resolutions.count, id: \.self) { i in
+                                    Text(resolutions[i]).tag(i)
                                 }
-                                .buttonStyle(.bordered)
-                                .font(.system(size: 11))
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        
+                        let fpsLabel = fpsModes.indices.contains(appManager.selectedFpsIndex) ? fpsModes[appManager.selectedFpsIndex] : fpsModes.first ?? ""
+                        GlassCard(title: "Frame Rate", value: "\(fpsLabel) FPS") {
+                            Picker("", selection: $appManager.selectedFpsIndex) {
+                                ForEach(0..<fpsModes.count, id: \.self) { i in
+                                    Text(fpsModes[i]).tag(i)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        
+                        GlassCard(title: "Bitrate", value: String(format: "%.1f Mbps", appManager.bitrateMbps)) {
+                            VStack(spacing: 8) {
+                                Slider(value: $appManager.bitrateMbps, in: 1...15, step: 0.5)
+                                HStack {
+                                    Text("Low")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text("High")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+
+                        GlassCard(title: "Virtual Display", value: "\(appManager.virtualDisplayWidth)×\(appManager.virtualDisplayHeight)") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                TextField("Display Name", text: $appManager.virtualDisplayName)
+                                    .textFieldStyle(.roundedBorder)
+                                HStack {
+                                    TextField("Width", value: $appManager.virtualDisplayWidth, format: .number)
+                                        .textFieldStyle(.roundedBorder)
+                                    TextField("Height", value: $appManager.virtualDisplayHeight, format: .number)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                                Button("Apply") {
+                                    appManager.applyVirtualDisplayConfig()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                             }
                         }
                     }
                 }
-                
-                Spacer()
             }
             .padding()
         }
@@ -251,8 +226,8 @@ struct SettingsTabView: View {
 struct ConnectionTabView: View {
     @EnvironmentObject var appManager: AppManager
     @State private var piAddressInput = ""
-    @State private var piPort = "5900"
-    @State private var use60FPS = false
+    @State private var piPort = ""
+    @State private var usbDeviceInput = ""
     
     var body: some View {
         ScrollView {
@@ -262,13 +237,20 @@ struct ConnectionTabView: View {
                         Circle()
                             .fill(appManager.isConnected ? Color.green : Color.gray)
                             .frame(width: 8, height: 8)
-                        
                         Text(appManager.piAddress)
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(.secondary)
-                        
                         Spacer()
                     }
+                }
+
+                GlassCard(title: "Mode", value: appManager.connectionMode.label) {
+                    Picker("", selection: $appManager.connectionMode) {
+                        ForEach(ConnectionMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
                 }
                 
                 GlassCard(title: "Pi Address", value: piAddressInput.isEmpty ? "Auto-detect" : piAddressInput) {
@@ -276,7 +258,6 @@ struct ConnectionTabView: View {
                         TextField("e.g., 192.168.1.100", text: $piAddressInput)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 11, design: .monospaced))
-                        
                         HStack(spacing: 8) {
                             Text("Port")
                                 .font(.system(size: 11))
@@ -288,11 +269,14 @@ struct ConnectionTabView: View {
                         }
                     }
                 }
-                
-                GlassCard(title: "Performance Mode", value: use60FPS ? "60 FPS" : "30 FPS") {
-                    HStack(spacing: 8) {
-                        Toggle("60 FPS Mode (requires Gigabit network)", isOn: $use60FPS)
-                            .font(.system(size: 11))
+
+                if appManager.connectionMode != .network {
+                    GlassCard(title: "USB Device", value: usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput) {
+                        VStack(spacing: 8) {
+                            TextField("/dev/cu.usbmodemXXXX", text: $usbDeviceInput)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11, design: .monospaced))
+                        }
                     }
                 }
                 
@@ -310,11 +294,8 @@ struct ConnectionTabView: View {
                     Button(action: {
                         let trimmed = piAddressInput.trimmingCharacters(in: .whitespaces)
                         let port = Int(piPort) ?? 5900
-                        if use60FPS {
-                            appManager.connect60fps(to: trimmed, port: port)
-                        } else {
-                            appManager.connect(to: trimmed, port: port)
-                        }
+                        appManager.usbDevice = usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput
+                        appManager.connect(to: trimmed, port: port)
                     }) {
                         Label("Connect", systemImage: "bolt.horizontal.fill")
                             .frame(maxWidth: .infinity)
@@ -330,21 +311,38 @@ struct ConnectionTabView: View {
                 }
 
                 GlassCard(title: "Connection Logs", value: "Live") {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 2) {
-                                ForEach(Array(appManager.logs.suffix(50).enumerated()), id: \.offset) { idx, line in
-                                    Text(line)
-                                        .font(.system(size: 10, design: .monospaced))
-                                        .foregroundColor(.primary)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .id(idx)
-                                }
+                    VStack(spacing: 6) {
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                let text = appManager.logs.joined(separator: "\n")
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.setString(text, forType: .string)
+                                appManager.appendLog("Connection logs copied to clipboard")
+                            }) {
+                                Label("Copy Logs", systemImage: "doc.on.doc")
+                                    .font(.system(size: 11))
                             }
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .buttonStyle(.bordered)
+                        }
+
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(Array(appManager.logs.suffix(50).enumerated()), id: \.offset) { idx, line in
+                                        Text(line)
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .id(idx)
+                                    }
+                                }
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                             .onReceive(appManager.$logs) { _ in
                                 if !appManager.logs.isEmpty {
                                     let lastIdx = appManager.logs.count - 1
@@ -354,13 +352,24 @@ struct ConnectionTabView: View {
                                 }
                             }
                         }
+                        .frame(height: 150)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(8)
                     }
-                    .frame(height: 150)
-                    .background(Color.black.opacity(0.3))
-                    .cornerRadius(8)
                 }
             }
             .padding()
+        }
+        .onAppear {
+            if piAddressInput.isEmpty {
+                piAddressInput = appManager.networkHost
+            }
+            if piPort.isEmpty {
+                piPort = "\(appManager.networkPort)"
+            }
+            if usbDeviceInput.isEmpty {
+                usbDeviceInput = appManager.usbDevice
+            }
         }
     }
 }

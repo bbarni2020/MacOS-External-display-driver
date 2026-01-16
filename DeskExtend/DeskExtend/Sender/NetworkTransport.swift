@@ -5,6 +5,9 @@ class NetworkTransport {
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "com.deskextend.network")
     private var port: UInt16 = 5900
+    private var targetHost: String?
+    private var reconnectTimer: Timer?
+    private var isAttemptingConnection = false
     
     private var bytesSent: UInt64 = 0
     private var lastStatsTime = Date()
@@ -26,18 +29,21 @@ class NetworkTransport {
             statusCallback?(false, "Not connected")
             return
         }
+        targetHost = trimmed
         self.port = port
+        isAttemptingConnection = true
+        reconnectTimer?.invalidate()
         connection?.cancel()
         
-        let params = NWParameters.tcp
+        let tcpOptions = NWProtocolTCP.Options()
+        tcpOptions.enableKeepalive = true
+        tcpOptions.keepaliveIdle = 2
+        tcpOptions.noDelay = true
+        
+        let params = NWParameters(tls: nil, tcp: tcpOptions)
         params.allowLocalEndpointReuse = true
         params.serviceClass = .responsiveData
-        
-        if let tcpOptions = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
-            tcpOptions.enableKeepalive = true
-            tcpOptions.keepaliveIdle = 2
-            tcpOptions.noDelay = true
-        }
+        params.preferNoProxies = true
         
         let newConnection = NWConnection(host: NWEndpoint.Host(trimmed), port: NWEndpoint.Port(integerLiteral: port), using: params)
         connection = newConnection
@@ -46,6 +52,7 @@ class NetworkTransport {
         newConnection.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
+                self?.isAttemptingConnection = false
                 self?.connectedAddress = "\(trimmed):\(port)"
                 self?.statusCallback?(true, "\(trimmed):\(port)")
                 self?.logCallback?("Connection ready")
@@ -53,12 +60,16 @@ class NetworkTransport {
                 self?.logCallback?("Preparing connection...")
             case .waiting(let error):
                 self?.logCallback?("Waiting: \(error.localizedDescription)")
+                self?.scheduleReconnect()
             case .failed(let error):
+                self?.isAttemptingConnection = false
                 self?.connection = nil
                 self?.connectedAddress = "Not connected"
                 self?.statusCallback?(false, "Not connected")
                 self?.logCallback?("Failed: \(error.localizedDescription)")
+                self?.scheduleReconnect()
             case .cancelled:
+                self?.isAttemptingConnection = false
                 self?.connection = nil
                 self?.connectedAddress = "Not connected"
                 self?.statusCallback?(false, "Not connected")
@@ -71,8 +82,19 @@ class NetworkTransport {
         newConnection.start(queue: queue)
     }
     
+    private func scheduleReconnect() {
+        guard let host = targetHost, !host.isEmpty, !isAttemptingConnection else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.reconnectTimer?.invalidate()
+            self?.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                self.connect(to: host, port: self.port)
+            }
+        }
+    }
+    
     func send(data: Data) {
-        guard let connection = connection else { return }
+        guard let connection = connection, connection.state == .ready else { return }
         
         var packet = data
         var header = UInt32(data.count).bigEndian
@@ -101,8 +123,13 @@ class NetworkTransport {
     }
     
     func stop() {
+        isAttemptingConnection = false
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+        targetHost = nil
         connection?.cancel()
         connection = nil
         connectedAddress = "Not connected"
+        statusCallback?(false, "Not connected")
     }
 }

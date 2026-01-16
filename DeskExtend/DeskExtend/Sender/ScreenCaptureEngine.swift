@@ -6,14 +6,16 @@ import CoreVideo
 @available(macOS 13.0, *)
 class ScreenCaptureEngine: NSObject {
     private let config: DisplayConfig
-    private let windowID: Int
+    private let targetDisplay: DisplayInfo
     private let encoder: VideoEncoder
     private var stream: SCStream?
     private var streamOutput: StreamOutput?
+    private let queue = DispatchQueue(label: "com.deskextend.capture", qos: .userInteractive)
+    private var isStopping = false
     
-    init(config: DisplayConfig, windowID: Int, encoder: VideoEncoder) {
+    init(config: DisplayConfig, targetDisplay: DisplayInfo, encoder: VideoEncoder) {
         self.config = config
-        self.windowID = windowID
+        self.targetDisplay = targetDisplay
         self.encoder = encoder
         super.init()
     }
@@ -21,18 +23,15 @@ class ScreenCaptureEngine: NSObject {
     func start() throws {
         Task {
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                if let window = content.windows.first(where: { $0.windowID == UInt32(windowID) }) {
-                    let filter = SCContentFilter(desktopIndependentWindow: window)
-                    try await startStream(with: filter)
-                } else if let display = content.displays.first {
-                    let filter = SCContentFilter(display: display, excludingWindows: [])
-                    try await startStream(with: filter)
-                } else {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                guard self.targetDisplay.index >= 0 && self.targetDisplay.index < content.displays.count else {
                     throw CaptureError.noDisplayFound
                 }
+                let display = content.displays[self.targetDisplay.index]
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                try await startStream(with: filter)
             } catch {
-                throw error
+                self.encoder.handleCaptureError(error)
             }
         }
     }
@@ -43,24 +42,34 @@ class ScreenCaptureEngine: NSObject {
         streamConfig.height = config.height
         streamConfig.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(config.fps))
         streamConfig.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-        streamConfig.queueDepth = 2
+        streamConfig.queueDepth = 3
         streamConfig.showsCursor = true
-        streamConfig.scalesToFit = false
-        streamConfig.captureResolution = .best
-        streamConfig.backgroundColor = .black
-        streamConfig.shouldBeOpaque = false
+        streamConfig.captureResolution = .automatic
         
         stream = SCStream(filter: filter, configuration: streamConfig, delegate: nil)
         streamOutput = StreamOutput(encoder: encoder)
         
-        let captureQueue = DispatchQueue(label: "com.deskextend.capture", qos: .userInteractive, attributes: [], autoreleaseFrequency: .workItem)
-        try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: captureQueue)
+        try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: queue)
         try await stream?.startCapture()
     }
     
     func stop() {
-        Task {
-            try? await stream?.stopCapture()
+        guard !isStopping else { return }
+        isStopping = true
+        if let stream = stream {
+            Task {
+                do {
+                    try await stream.stopCapture()
+                    self.stream = nil
+                    self.streamOutput = nil
+                } catch {
+                    self.stream = nil
+                    self.streamOutput = nil
+                }
+                self.isStopping = false
+            }
+        } else {
+            isStopping = false
         }
     }
 }

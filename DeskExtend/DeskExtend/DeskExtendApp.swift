@@ -4,6 +4,7 @@ import AppKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     var appManager: AppManager?
     var shouldAllowTermination = false
+    var virtualDisplayManager: VirtualDisplayManager?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -20,6 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         NSApplication.shared.setActivationPolicy(.accessory)
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
+        virtualDisplayManager = VirtualDisplayManager()
     }
     
     @objc func windowDidBecomeKey(_ notification: Notification) {
@@ -65,6 +67,7 @@ struct DeskExtendApp: App {
                 .frame(minWidth: 800, maxWidth: 1200, minHeight: 600, maxHeight: .infinity)
                 .onAppear {
                     appDelegate.appManager = appManager
+                    appManager.virtualDisplayManager = appDelegate.virtualDisplayManager
                     appManager.windowIsOpen = true
                     NSApplication.shared.setActivationPolicy(.regular)
                     
@@ -76,11 +79,8 @@ struct DeskExtendApp: App {
                     
                     if senderController == nil {
                         senderController = SenderController(appManager: appManager)
-                        appManager.onConnect = { host, port in
-                            senderController?.connect(host: host, port: port)
-                        }
-                        appManager.onConnect60fps = { host, port in
-                            senderController?.connect60fps(host: host, port: port)
+                        appManager.onConnectRequest = { request in
+                            senderController?.connect(request: request)
                         }
                         appManager.onDisconnect = { [weak senderController] in
                             senderController?.stop()

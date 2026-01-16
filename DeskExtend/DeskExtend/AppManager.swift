@@ -15,43 +15,85 @@ final class AppManager: ObservableObject {
     @Published var windowIsOpen = false
     @Published var shouldOpenWindow = false
     @Published var logs: [String] = []
+    @Published var connectionMode: ConnectionMode = ConfigurationManager.shared.connectionMode {
+        didSet { ConfigurationManager.shared.connectionMode = connectionMode }
+    }
+    @Published var networkHost: String = ConfigurationManager.shared.networkHost {
+        didSet { ConfigurationManager.shared.networkHost = networkHost }
+    }
+    @Published var networkPort: Int = ConfigurationManager.shared.networkPort {
+        didSet { ConfigurationManager.shared.networkPort = networkPort }
+    }
+    @Published var usbDevice: String = ConfigurationManager.shared.usbDevice {
+        didSet { ConfigurationManager.shared.usbDevice = usbDevice }
+    }
+    @Published var virtualDisplayName: String = ConfigurationManager.shared.virtualDisplayName {
+        didSet { ConfigurationManager.shared.virtualDisplayName = virtualDisplayName }
+    }
+    @Published var virtualDisplayWidth: Int = ConfigurationManager.shared.virtualDisplaySize.width {
+        didSet { ConfigurationManager.shared.virtualDisplaySize = (virtualDisplayWidth, virtualDisplayHeight) }
+    }
+    @Published var virtualDisplayHeight: Int = ConfigurationManager.shared.virtualDisplaySize.height {
+        didSet { ConfigurationManager.shared.virtualDisplaySize = (virtualDisplayWidth, virtualDisplayHeight) }
+    }
+    @Published var selectedResolutionIndex: Int = 0 {
+        didSet { persistResolution() }
+    }
+    @Published var selectedFpsIndex: Int = 1 {
+        didSet { persistFps() }
+    }
+    @Published var bitrateMbps: Double = Double(ConfigurationManager.shared.bitrate) / 1_000_000.0 {
+        didSet { ConfigurationManager.shared.bitrate = Int(bitrateMbps * 1_000_000) }
+    }
     
     private var statsTimer: Timer?
     private var startTime = Date()
 
-    var onConnect: ((String, Int) -> Void)?
-    var onConnect60fps: ((String, Int) -> Void)?
+    var onConnectRequest: ((ConnectionRequest) -> Void)?
     var onDisconnect: (() -> Void)?
+    weak var virtualDisplayManager: VirtualDisplayManager?
+    
+    private let resolutions: [(label: String, size: (Int, Int))] = [
+        ("1920×1080", (1920, 1080)),
+        ("1280×720", (1280, 720)),
+        ("1024×768", (1024, 768))
+    ]
+    private let fpsOptions: [Int] = [24, 30, 60]
     
     init() {
+        selectedResolutionIndex = indexForSavedResolution()
+        selectedFpsIndex = indexForSavedFps()
+        bitrateMbps = Double(ConfigurationManager.shared.bitrate) / 1_000_000.0
+        let savedRes = ConfigurationManager.shared.resolution
+        resolution = "\(savedRes.width)×\(savedRes.height)"
+        fps = ConfigurationManager.shared.fps
         setupStats()
     }
     
     func start() {
         isRunning = true
     }
-
+    
     func connect(to address: String, port: Int) {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            appendLog("No address provided")
-            return
-        }
-        appendLog("Connecting to \(trimmed):\(port)...")
-        onConnect?(trimmed, port)
-        piAddress = "\(trimmed):\(port)"
-        startTime = Date()
-    }
-    
-    func connect60fps(to address: String, port: Int) {
-        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            appendLog("No address provided")
-            return
-        }
-        appendLog("Connecting to \(trimmed):\(port) in 60 FPS mode...")
-        onConnect60fps?(trimmed, port)
-        piAddress = "\(trimmed):\(port)"
+        let host = trimmed.isEmpty ? networkHost : trimmed
+        let targetPort = port > 0 ? port : networkPort
+        appendLog("Connecting to \(host):\(targetPort)...")
+        let config = buildConfig()
+        let request = ConnectionRequest(
+            mode: connectionMode,
+            host: host,
+            port: targetPort,
+            usbDevice: usbDevice,
+            displayIndex: ConfigurationManager.shared.selectedDisplayIndex,
+            config: config
+        )
+        onConnectRequest?(request)
+        piAddress = "\(host):\(targetPort)"
+        networkHost = host
+        networkPort = targetPort
+        fps = config.fps
+        resolution = configLabel(for: config)
         startTime = Date()
     }
     
@@ -65,6 +107,17 @@ final class AppManager: ObservableObject {
     func stop() {
         isRunning = false
         disconnect()
+    }
+
+    func applyVirtualDisplayConfig() {
+        guard virtualDisplayWidth > 0, virtualDisplayHeight > 0 else { return }
+        ConfigurationManager.shared.virtualDisplayName = virtualDisplayName
+        ConfigurationManager.shared.virtualDisplaySize = (virtualDisplayWidth, virtualDisplayHeight)
+        virtualDisplayManager?.updateDisplay(
+            name: virtualDisplayName,
+            width: virtualDisplayWidth,
+            height: virtualDisplayHeight
+        )
     }
     
     private func setupStats() {
@@ -101,5 +154,53 @@ final class AppManager: ObservableObject {
     
     deinit {
         statsTimer?.invalidate()
+    }
+
+    private func buildConfig() -> DisplayConfig {
+        let resolution = resolutions[safe: selectedResolutionIndex]?.size ?? (1920, 1080)
+        let fpsValue = fpsOptions[safe: selectedFpsIndex] ?? 30
+        ConfigurationManager.shared.resolution = (resolution.0, resolution.1)
+        ConfigurationManager.shared.fps = fpsValue
+        ConfigurationManager.shared.bitrate = Int(bitrateMbps * 1_000_000)
+        return DisplayConfig(width: resolution.0, height: resolution.1, fps: fpsValue, bitrate: Int(bitrateMbps * 1_000_000))
+    }
+    
+    private func persistResolution() {
+        let res = resolutions[safe: selectedResolutionIndex]?.size ?? (1920, 1080)
+        ConfigurationManager.shared.resolution = (res.0, res.1)
+        resolution = "\(res.0)×\(res.1)"
+    }
+    
+    private func persistFps() {
+        let value = fpsOptions[safe: selectedFpsIndex] ?? 30
+        ConfigurationManager.shared.fps = value
+        fps = value
+    }
+    
+    private func indexForSavedResolution() -> Int {
+        let saved = ConfigurationManager.shared.resolution
+        if let idx = resolutions.firstIndex(where: { $0.size.0 == saved.width && $0.size.1 == saved.height }) {
+            return idx
+        }
+        return 0
+    }
+    
+    private func indexForSavedFps() -> Int {
+        let saved = ConfigurationManager.shared.fps
+        if let idx = fpsOptions.firstIndex(of: saved) {
+            return idx
+        }
+        return 1
+    }
+    
+    private func configLabel(for config: DisplayConfig) -> String {
+        "\(config.width)×\(config.height)"
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
     }
 }
