@@ -77,6 +77,9 @@ struct MenuBarView: View {
             Divider()
             
             Button("Quit DeskExtend") {
+                if appManager.isConnected {
+                    appManager.disconnect()
+                }
                 if let delegate = NSApplication.shared.delegate as? AppDelegate {
                     delegate.shouldAllowTermination = true
                 }

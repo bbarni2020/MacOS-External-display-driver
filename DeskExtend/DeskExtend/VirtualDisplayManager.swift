@@ -52,4 +52,10 @@ final class VirtualDisplayManager {
             NSLog("CGDisplayStream start error: \(error)")
         }
     }
+    
+    func stop() {
+        stream?.stop()
+        stream = nil
+        display = nil
+    }
 }

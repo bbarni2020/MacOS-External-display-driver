@@ -49,6 +49,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return .terminateCancel
     }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        virtualDisplayManager?.stop()
+    }
 }
 
 @main
