@@ -60,6 +60,9 @@ class VideoReceiver:
         return devices
     
     def start_firefox_kiosk(self):
+        if self.firefox_process and self.firefox_process.poll() is None:
+            return True
+
         waiting_html = get_waiting_html_path()
         if not os.path.exists(waiting_html):
             logger.warning(f"waiting.html not found at {waiting_html}")
@@ -82,8 +85,32 @@ class VideoReceiver:
             logger.warning(f"Failed to start Firefox: {e}")
             return False
     
-    def stop_firefox_kiosk(self):
-        if self.firefox_process:
+    @staticmethod
+    def has_wmctrl():
+        try:
+            result = subprocess.run(['which', 'wmctrl'], capture_output=True, text=True, timeout=1)
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def show_firefox_kiosk(self):
+        if not self.start_firefox_kiosk():
+            return
+        if self.has_wmctrl():
+            try:
+                subprocess.run(['wmctrl', '-r', 'DeskExtend - Waiting for Connection', '-b', 'remove,hidden'], timeout=1)
+                subprocess.run(['wmctrl', '-a', 'DeskExtend - Waiting for Connection'], timeout=1)
+            except Exception:
+                pass
+
+    def hide_firefox_kiosk(self):
+        if self.firefox_process and self.firefox_process.poll() is None:
+            if self.has_wmctrl():
+                try:
+                    subprocess.run(['wmctrl', '-r', 'DeskExtend - Waiting for Connection', '-b', 'add,hidden'], timeout=1)
+                    return
+                except Exception:
+                    pass
             try:
                 self.firefox_process.terminate()
                 try:
@@ -91,7 +118,7 @@ class VideoReceiver:
                 except subprocess.TimeoutExpired:
                     self.firefox_process.kill()
                 logger.info("Firefox kiosk mode stopped")
-            except:
+            except Exception:
                 pass
             self.firefox_process = None
     
@@ -433,7 +460,7 @@ class VideoReceiver:
         
         logger.info(f"Starting USB mode on device: {self.usb_device}")
         
-        self.start_firefox_kiosk()
+        self.show_firefox_kiosk()
         
         while self.running:
             try:
@@ -442,11 +469,11 @@ class VideoReceiver:
                     time.sleep(3)
                     continue
                 
-                self.stop_firefox_kiosk()
+                self.hide_firefox_kiosk()
                 
                 if not self.start_decoder():
                     self.close_usb()
-                    self.start_firefox_kiosk()
+                    self.show_firefox_kiosk()
                     time.sleep(3)
                     continue
                 
@@ -468,14 +495,14 @@ class VideoReceiver:
                     self.decoder_process = None
                 
                 logger.info("USB connection closed, waiting for next connection...")
-                self.start_firefox_kiosk()
+                self.show_firefox_kiosk()
                 time.sleep(1)
                 
             except Exception as e:
                 if self.running:
                     logger.error(f"USB error: {e}")
                     self.close_usb()
-                    self.start_firefox_kiosk()
+                    self.show_firefox_kiosk()
                     time.sleep(3)
     
     def run_hybrid(self):
@@ -483,7 +510,7 @@ class VideoReceiver:
         
         logger.info("Starting hybrid mode (USB priority with network fallback)")
         
-        self.start_firefox_kiosk()
+        self.show_firefox_kiosk()
         
         network_thread = None
         usb_active = False
@@ -494,12 +521,12 @@ class VideoReceiver:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if self.open_usb():
                         usb_active = True
-                        self.stop_firefox_kiosk()
+                        self.hide_firefox_kiosk()
                         
                         if not self.start_decoder():
                             self.close_usb()
                             usb_active = False
-                            self.start_firefox_kiosk()
+                            self.show_firefox_kiosk()
                         else:
                             logger.info("USB connected, processing stream...")
                             self.frame_count = 0
@@ -519,7 +546,7 @@ class VideoReceiver:
                                 self.decoder_process = None
                             
                             logger.info("USB connection closed")
-                            self.start_firefox_kiosk()
+                            self.show_firefox_kiosk()
                             time.sleep(1)
                             continue
                     else:
@@ -537,7 +564,7 @@ class VideoReceiver:
                     conn, addr = self.sock.accept()
                     logger.info(f"Connected from {addr}")
                     
-                    self.stop_firefox_kiosk()
+                    self.hide_firefox_kiosk()
                     
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
@@ -545,7 +572,7 @@ class VideoReceiver:
                     if not self.start_decoder():
                         conn.close()
                         self.sock.close()
-                        self.start_firefox_kiosk()
+                        self.show_firefox_kiosk()
                         continue
                     
                     self.frame_count = 0
@@ -566,7 +593,7 @@ class VideoReceiver:
                     
                     self.sock.close()
                     logger.info("Network connection closed")
-                    self.start_firefox_kiosk()
+                    self.show_firefox_kiosk()
                     
                 except socket.timeout:
                     if self.usb_device:
@@ -579,7 +606,7 @@ class VideoReceiver:
                     if self.sock:
                         self.sock.close()
                     self.close_usb()
-                    self.start_firefox_kiosk()
+                    self.show_firefox_kiosk()
                     time.sleep(3)
     
     def run(self):
@@ -600,21 +627,21 @@ class VideoReceiver:
         
         logger.info("Waiting for network connection...")
         
-        self.start_firefox_kiosk()
+        self.show_firefox_kiosk()
         
         while self.running:
             try:
                 conn, addr = self.sock.accept()
                 logger.info(f"Connected from {addr}")
                 
-                self.stop_firefox_kiosk()
+                self.hide_firefox_kiosk()
                 
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
                 
                 if not self.start_decoder():
                     conn.close()
-                    self.start_firefox_kiosk()
+                    self.show_firefox_kiosk()
                     continue
                 
                 self.frame_count = 0
@@ -634,14 +661,14 @@ class VideoReceiver:
                     self.decoder_process = None
                 
                 logger.info("Network connection closed, waiting for next connection...")
-                self.start_firefox_kiosk()
+                self.show_firefox_kiosk()
                 
             except socket.timeout:
                 continue
             except Exception as e:
                 if self.running:
                     logger.error(f"Connection error: {e}")
-                    self.start_firefox_kiosk()
+                    self.show_firefox_kiosk()
                     time.sleep(1)
     
     def stop(self):
