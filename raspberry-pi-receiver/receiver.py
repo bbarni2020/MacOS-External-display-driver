@@ -35,6 +35,32 @@ class VideoReceiver:
         has_v4l2_sink = os.path.exists('/dev/video0') and os.access('/dev/video0', os.W_OK)
 
         pipelines.append({
+            'name': 'Software avdec + gtksink',
+            'cmd': [
+                'gst-launch-1.0', '-e',
+                'fdsrc', 'fd=0',
+                '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
+                '!', 'h264parse',
+                '!', 'avdec_h264', 'max-threads=4',
+                '!', 'videoconvert',
+                '!', 'gtksink', 'sync=false'
+            ]
+        })
+
+        pipelines.append({
+            'name': 'Hardware v4l2 + gtksink',
+            'cmd': [
+                'gst-launch-1.0', '-e',
+                'fdsrc', 'fd=0',
+                '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
+                '!', 'h264parse',
+                '!', 'v4l2h264dec',
+                '!', 'videoconvert',
+                '!', 'gtksink', 'sync=false'
+            ]
+        })
+
+        pipelines.append({
             'name': 'Hardware v4l2 + autovideosink',
             'cmd': [
                 'gst-launch-1.0', '-e',
@@ -59,32 +85,6 @@ class VideoReceiver:
                     '!', 'v4l2sink', 'device=/dev/video0', 'sync=false'
                 ]
             })
-
-        pipelines.append({
-            'name': 'Hardware v4l2 + gtksink',
-            'cmd': [
-                'gst-launch-1.0', '-e',
-                'fdsrc', 'fd=0',
-                '!', 'queue', 'max-size-buffers=2', 'max-size-time=0', 'max-size-bytes=0',
-                '!', 'h264parse',
-                '!', 'v4l2h264dec',
-                '!', 'videoconvert',
-                '!', 'gtksink', 'sync=false'
-            ]
-        })
-
-        pipelines.append({
-            'name': 'Software avdec + autovideosink',
-            'cmd': [
-                'gst-launch-1.0', '-e',
-                'fdsrc', 'fd=0',
-                '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
-                '!', 'h264parse',
-                '!', 'avdec_h264', 'max-threads=4',
-                '!', 'videoconvert',
-                '!', 'autovideosink', 'sync=false'
-            ]
-        })
 
         return pipelines
     
