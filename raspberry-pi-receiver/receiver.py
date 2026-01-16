@@ -9,7 +9,10 @@ import threading
 import time
 import os
 import logging
-import serial
+try:
+    import serial
+except Exception:
+    serial = None
 import glob
 
 logging.basicConfig(
@@ -191,7 +194,17 @@ class VideoReceiver:
             return False
         
         try:
-            self.serial_conn = serial.Serial(
+            try:
+                from serial import Serial as _Serial, SerialException as _SerialException
+            except Exception:
+                if serial and hasattr(serial, 'Serial'):
+                    _Serial = serial.Serial
+                    _SerialException = getattr(serial, 'SerialException', Exception)
+                else:
+                    logger.error("pyserial not available or invalid 'serial' module")
+                    return False
+
+            self.serial_conn = _Serial(
                 port=self.usb_device,
                 baudrate=115200,
                 timeout=1.0,
@@ -226,13 +239,15 @@ class VideoReceiver:
     def read_from_connection(self, conn, chunk_size=262144):
         """Read from socket or serial connection"""
         try:
-            if isinstance(conn, serial.Serial):
+            if serial and hasattr(serial, 'Serial') and isinstance(conn, serial.Serial):
                 return conn.read(min(chunk_size, 4096)) if conn.in_waiting else b''
             else:
                 return conn.recv(chunk_size)
-        except (socket.timeout, serial.SerialException):
+        except socket.timeout:
             return b''
         except Exception as e:
+            if serial and hasattr(serial, 'SerialException') and isinstance(e, serial.SerialException):
+                return b''
             logger.error(f"Read error: {e}")
             return None
     
@@ -240,7 +255,7 @@ class VideoReceiver:
         logger.info("Processing video stream...")
         
         buffer = b''
-        is_serial = isinstance(conn, serial.Serial)
+        is_serial = serial and hasattr(serial, 'Serial') and isinstance(conn, serial.Serial)
         
         while self.running:
             try:
