@@ -113,12 +113,38 @@ class VideoReceiver:
         except Exception as e:
             logger.warning(f"Failed to get screen resolution: {e}")
         return None
+
+    @staticmethod
+    def has_vaapi_sink():
+        try:
+            result = subprocess.run(
+                ['gst-inspect-1.0', 'vaapisink'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
     
     def detect_decoder_pipeline(self):
         pipelines = []
 
         has_v4l2_sink = os.path.exists('/dev/video0') and os.access('/dev/video0', os.W_OK)
         screen_res = self.get_screen_resolution()
+
+        if self.has_vaapi_sink():
+            pipelines.append({
+                'name': 'VAAPI h264 + vaapisink fullscreen',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'vaapih264dec',
+                    '!', 'vaapisink', 'fullscreen=yes', 'sync=false'
+                ]
+            })
 
         if screen_res:
             width, height = screen_res

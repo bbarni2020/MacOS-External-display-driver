@@ -19,6 +19,7 @@ apt-get install -y \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-libav \
+    gstreamer1.0-vaapi \
     gstreamer1.0-omx \
     libgstreamer1.0-0 \
     libgstreamer-plugins-base1.0-0

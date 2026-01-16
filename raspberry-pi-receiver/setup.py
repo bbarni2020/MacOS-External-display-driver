@@ -15,6 +15,7 @@ class RaspberryPiSetup:
             'gstreamer1.0-plugins-bad',
             'gstreamer1.0-plugins-ugly',
             'gstreamer1.0-libav',
+            'gstreamer1.0-vaapi',
             'libgstreamer-ocl-1.0-0',
             'gstreamer1.0-nice',
             'python3-gi',
