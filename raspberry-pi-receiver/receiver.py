@@ -21,6 +21,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def get_waiting_html_path():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, 'waiting.html')
+
 class VideoReceiver:
     def __init__(self, host='0.0.0.0', port=5900, mode='network', usb_device=None):
         self.host = host
@@ -30,6 +34,7 @@ class VideoReceiver:
         self.sock = None
         self.serial_conn = None
         self.decoder_process = None
+        self.firefox_process = None
         self.running = False
         self.frame_count = 0
         self.last_fps_time = time.time()
@@ -54,23 +59,96 @@ class VideoReceiver:
             devices.extend(glob.glob(pattern))
         return devices
     
+    def start_firefox_kiosk(self):
+        waiting_html = get_waiting_html_path()
+        if not os.path.exists(waiting_html):
+            logger.warning(f"waiting.html not found at {waiting_html}")
+            return False
+        
+        try:
+            env = os.environ.copy()
+            if 'DISPLAY' not in env:
+                env['DISPLAY'] = ':0'
+            
+            self.firefox_process = subprocess.Popen(
+                ['firefox', '--kiosk', f'file://{waiting_html}'],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            logger.info("Firefox kiosk mode started with waiting.html")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to start Firefox: {e}")
+            return False
+    
+    def stop_firefox_kiosk(self):
+        if self.firefox_process:
+            try:
+                self.firefox_process.terminate()
+                try:
+                    self.firefox_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self.firefox_process.kill()
+                logger.info("Firefox kiosk mode stopped")
+            except:
+                pass
+            self.firefox_process = None
+    
+    @staticmethod
+    def get_screen_resolution():
+        try:
+            result = subprocess.run(
+                "xrandr | grep '\*' | tr -s ' ' | cut -d' ' -f2",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                resolution = result.stdout.strip().split('\n')[0]
+                if 'x' in resolution:
+                    width, height = resolution.split('x')
+                    return int(width), int(height)
+        except Exception as e:
+            logger.warning(f"Failed to get screen resolution: {e}")
+        return None
+    
     def detect_decoder_pipeline(self):
         pipelines = []
 
         has_v4l2_sink = os.path.exists('/dev/video0') and os.access('/dev/video0', os.W_OK)
+        screen_res = self.get_screen_resolution()
 
-        pipelines.append({
-            'name': 'Hardware v4l2 + autovideosink',
-            'cmd': [
-                'gst-launch-1.0', '-e',
-                'fdsrc', 'fd=0',
-                '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
-                '!', 'h264parse',
-                '!', 'v4l2h264dec', 'capture-io-mode=mmap',
-                '!', 'videoconvert',
-                '!', 'autovideosink', 'fullscreen=true', 'sync=false'
-            ]
-        })
+        if screen_res:
+            width, height = screen_res
+            pipelines.append({
+                'name': 'Hardware v4l2 + autovideosink (scaled)',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'v4l2h264dec', 'capture-io-mode=mmap',
+                    '!', 'videoconvert',
+                    '!', 'videoscale',
+                    '!', f'video/x-raw,width={width},height={height}',
+                    '!', 'autovideosink', 'sync=false'
+                ]
+            })
+        else:
+            pipelines.append({
+                'name': 'Hardware v4l2 + autovideosink',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=3', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'v4l2h264dec', 'capture-io-mode=mmap',
+                    '!', 'videoconvert',
+                    '!', 'autovideosink', 'sync=false'
+                ]
+            })
 
         if has_v4l2_sink:
             pipelines.append({
@@ -98,18 +176,35 @@ class VideoReceiver:
             ]
         })
 
-        pipelines.append({
-            'name': 'Software avdec + autovideosink',
-            'cmd': [
-                'gst-launch-1.0', '-e',
-                'fdsrc', 'fd=0',
-                '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
-                '!', 'h264parse',
-                '!', 'avdec_h264', 'max-threads=4',
-                '!', 'videoconvert',
-                '!', 'autovideosink', 'fullscreen=true', 'sync=false'
-            ]
-        })
+        if screen_res:
+            width, height = screen_res
+            pipelines.append({
+                'name': 'Software avdec + autovideosink (scaled)',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'avdec_h264', 'max-threads=4',
+                    '!', 'videoconvert',
+                    '!', 'videoscale',
+                    '!', f'video/x-raw,width={width},height={height}',
+                    '!', 'autovideosink', 'sync=false'
+                ]
+            })
+        else:
+            pipelines.append({
+                'name': 'Software avdec + autovideosink',
+                'cmd': [
+                    'gst-launch-1.0', '-e',
+                    'fdsrc', 'fd=0',
+                    '!', 'queue', 'max-size-buffers=4', 'max-size-time=0', 'max-size-bytes=0',
+                    '!', 'h264parse',
+                    '!', 'avdec_h264', 'max-threads=4',
+                    '!', 'videoconvert',
+                    '!', 'autovideosink', 'sync=false'
+                ]
+            })
 
         return pipelines
     
@@ -312,6 +407,8 @@ class VideoReceiver:
         
         logger.info(f"Starting USB mode on device: {self.usb_device}")
         
+        self.start_firefox_kiosk()
+        
         while self.running:
             try:
                 if not self.open_usb():
@@ -319,8 +416,11 @@ class VideoReceiver:
                     time.sleep(3)
                     continue
                 
+                self.stop_firefox_kiosk()
+                
                 if not self.start_decoder():
                     self.close_usb()
+                    self.start_firefox_kiosk()
                     time.sleep(3)
                     continue
                 
@@ -342,19 +442,22 @@ class VideoReceiver:
                     self.decoder_process = None
                 
                 logger.info("USB connection closed, waiting for next connection...")
+                self.start_firefox_kiosk()
                 time.sleep(1)
                 
             except Exception as e:
                 if self.running:
                     logger.error(f"USB error: {e}")
                     self.close_usb()
+                    self.start_firefox_kiosk()
                     time.sleep(3)
     
     def run_hybrid(self):
-        """Run hybrid mode: try USB first, fallback to network"""
         self.running = True
         
         logger.info("Starting hybrid mode (USB priority with network fallback)")
+        
+        self.start_firefox_kiosk()
         
         network_thread = None
         usb_active = False
@@ -365,9 +468,12 @@ class VideoReceiver:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if self.open_usb():
                         usb_active = True
+                        self.stop_firefox_kiosk()
+                        
                         if not self.start_decoder():
                             self.close_usb()
                             usb_active = False
+                            self.start_firefox_kiosk()
                         else:
                             logger.info("USB connected, processing stream...")
                             self.frame_count = 0
@@ -387,6 +493,7 @@ class VideoReceiver:
                                 self.decoder_process = None
                             
                             logger.info("USB connection closed")
+                            self.start_firefox_kiosk()
                             time.sleep(1)
                             continue
                     else:
@@ -404,12 +511,15 @@ class VideoReceiver:
                     conn, addr = self.sock.accept()
                     logger.info(f"Connected from {addr}")
                     
+                    self.stop_firefox_kiosk()
+                    
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
                     
                     if not self.start_decoder():
                         conn.close()
                         self.sock.close()
+                        self.start_firefox_kiosk()
                         continue
                     
                     self.frame_count = 0
@@ -430,6 +540,7 @@ class VideoReceiver:
                     
                     self.sock.close()
                     logger.info("Network connection closed")
+                    self.start_firefox_kiosk()
                     
                 except socket.timeout:
                     if self.usb_device:
@@ -442,6 +553,7 @@ class VideoReceiver:
                     if self.sock:
                         self.sock.close()
                     self.close_usb()
+                    self.start_firefox_kiosk()
                     time.sleep(3)
     
     def run(self):
@@ -462,16 +574,21 @@ class VideoReceiver:
         
         logger.info("Waiting for network connection...")
         
+        self.start_firefox_kiosk()
+        
         while self.running:
             try:
                 conn, addr = self.sock.accept()
                 logger.info(f"Connected from {addr}")
+                
+                self.stop_firefox_kiosk()
                 
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
                 
                 if not self.start_decoder():
                     conn.close()
+                    self.start_firefox_kiosk()
                     continue
                 
                 self.frame_count = 0
@@ -491,12 +608,14 @@ class VideoReceiver:
                     self.decoder_process = None
                 
                 logger.info("Network connection closed, waiting for next connection...")
+                self.start_firefox_kiosk()
                 
             except socket.timeout:
                 continue
             except Exception as e:
                 if self.running:
                     logger.error(f"Connection error: {e}")
+                    self.start_firefox_kiosk()
                     time.sleep(1)
     
     def stop(self):
@@ -508,6 +627,8 @@ class VideoReceiver:
                 self.decoder_process.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 self.decoder_process.kill()
+        
+        self.stop_firefox_kiosk()
         
         if self.sock:
             self.sock.close()
