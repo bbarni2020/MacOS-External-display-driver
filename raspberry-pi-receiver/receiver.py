@@ -115,6 +115,42 @@ class VideoReceiver:
             threading.Timer(delay, self.hide_firefox_kiosk).start()
         except Exception as e:
             logger.warning(f"Failed to schedule Firefox hide: {e}")
+
+    def schedule_hide_when_window_present(self, window_names, appear_timeout=3.0, after_delay=5.0):
+        def watcher():
+            try:
+                end_time = time.time() + appear_timeout
+                found = False
+                while time.time() < end_time and not found and self.running:
+                    try:
+                        if self.has_wmctrl():
+                            proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
+                            out = proc.stdout if proc.returncode == 0 else ''
+                        else:
+                            proc = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=1)
+                            out = proc.stdout if proc.returncode == 0 else ''
+
+                        for name in window_names:
+                            if name in out:
+                                found = True
+                                break
+                    except Exception:
+                        pass
+                    if not found:
+                        time.sleep(0.25)
+
+                if found and self.running:
+                    time.sleep(after_delay)
+                    try:
+                        self.hide_firefox_kiosk()
+                    except Exception:
+                        pass
+                else:
+                    logger.info("No matching window found within timeout; not hiding Firefox")
+            except Exception as e:
+                logger.warning(f"Watcher failed: {e}")
+
+        threading.Thread(target=watcher, daemon=True).start()
     
     @staticmethod
     def get_screen_resolution():
@@ -486,8 +522,7 @@ class VideoReceiver:
                     logger.warning("Retrying USB connection in 3 seconds...")
                     time.sleep(3)
                     continue
-                
-                self.hide_firefox_kiosk_delayed(5.0)
+                self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                 
                 if not self.start_decoder():
                     self.close_usb()
@@ -539,7 +574,8 @@ class VideoReceiver:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if self.open_usb():
                         usb_active = True
-                        self.hide_firefox_kiosk_delayed(5.0)
+                        # Start watcher for decoder windows, then hide Firefox after detection+delay
+                        self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                         
                         if not self.start_decoder():
                             self.close_usb()
@@ -581,8 +617,7 @@ class VideoReceiver:
                     conn, addr = self.sock.accept()
                     logger.info(f"Connected from {addr}")
                     
-                    self.hide_firefox_kiosk()
-                    self.hide_firefox_kiosk_delayed(5.0)
+                    self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                     
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
@@ -650,8 +685,8 @@ class VideoReceiver:
             try:
                 conn, addr = self.sock.accept()
                 logger.info(f"Connected from {addr}")
-                
-                self.hide_firefox_kiosk()
+
+                self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                 
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
