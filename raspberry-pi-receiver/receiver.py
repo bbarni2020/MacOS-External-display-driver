@@ -316,7 +316,6 @@ class VideoReceiver:
                 for name in window_names:
                     try:
                         subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1)
-                        return
                     except Exception:
                         continue
             except Exception:
