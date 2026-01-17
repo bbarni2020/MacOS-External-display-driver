@@ -98,10 +98,19 @@ final class AppManager: ObservableObject {
     }
     
     func disconnect() {
-        appendLog("Disconnecting")
+        appendLog("Disconnecting...")
+        
+        // Call the disconnect handler (stops SenderController)
         onDisconnect?()
+        
+        // Update UI state
         isConnected = false
         piAddress = "Not connected"
+        bitrate = 0.0
+        encodedFrames = 0
+        droppedFrames = 0
+        
+        appendLog("Disconnected")
     }
     
     func stop() {

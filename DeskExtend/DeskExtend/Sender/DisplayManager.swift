@@ -13,10 +13,11 @@ final class DisplayManager {
         let frame = screen.frame
         let backing = screen.convertRectToBacking(frame)
         let index = NSScreen.screens.firstIndex(of: screen) ?? 0
+        let displayName = screen.localizedName ?? (screen == NSScreen.main ? "Main Display" : "Display")
         return DisplayInfo(
             id: index,
             index: index,
-            name: screen == NSScreen.main ? "Main Display" : "Display",
+            name: displayName,
             width: Int(frame.width),
             height: Int(frame.height),
             backingWidth: Int(backing.width),
@@ -26,6 +27,16 @@ final class DisplayManager {
             isMain: screen == NSScreen.main,
             colorSpace: screen.colorSpace?.localizedName ?? "Unknown"
         )
+    }
+
+    func displayNamed(_ name: String) -> DisplayInfo? {
+        for screen in NSScreen.screens {
+            let displayName = screen.localizedName ?? ""
+            if displayName == name {
+                return info(for: screen)
+            }
+        }
+        return nil
     }
 
     func display(at index: Int) -> DisplayInfo? {

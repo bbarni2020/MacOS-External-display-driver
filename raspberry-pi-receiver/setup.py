@@ -16,12 +16,14 @@ class RaspberryPiSetup:
             'gstreamer1.0-plugins-ugly',
             'gstreamer1.0-libav',
             'gstreamer1.0-vaapi',
-            'libgstreamer-ocl-1.0-0',
+            'libgstreamer1.0-0',
             'gstreamer1.0-nice',
             'wmctrl',
             'python3-gi',
             'python3-dev',
             'libgirepository1.0-dev',
+            'python3-serial',
+            'python3-pip',
         ]
     
     def check_system(self):

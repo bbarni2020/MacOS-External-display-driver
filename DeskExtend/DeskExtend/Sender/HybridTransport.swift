@@ -68,12 +68,27 @@ final class HybridTransport {
     }
 
     func stop() {
-        queue.async { [weak self] in
-            self?.usbTransport?.stop()
-            self?.networkTransport?.stop()
-            self?.usbTransport = nil
-            self?.networkTransport = nil
-            self?.mode = nil
+        // Use sync to ensure cleanup completes before returning
+        queue.sync {
+            logCallback?("Stopping hybrid transport...")
+            
+            // Stop USB transport
+            if let usb = usbTransport {
+                usb.stop()
+                logCallback?("USB transport stopped")
+            }
+            usbTransport = nil
+            
+            // Stop network transport
+            if let network = networkTransport {
+                network.stop()
+                logCallback?("Network transport stopped")
+            }
+            networkTransport = nil
+            
+            mode = nil
+            statusCallback?(false, "Not connected")
+            logCallback?("Hybrid transport stopped")
         }
     }
 }

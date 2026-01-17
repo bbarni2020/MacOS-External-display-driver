@@ -18,7 +18,17 @@ class SenderController {
             appManager?.appendLog("macOS 13+ required for ScreenCaptureKit")
             return
         }
-        guard let targetDisplay = DisplayManager.shared.display(at: request.displayIndex) ?? DisplayManager.shared.mainDisplay() else {
+        let virtualName = ConfigurationManager.shared.virtualDisplayName
+        let targetDisplay: DisplayInfo?
+        if let vd = DisplayManager.shared.displayNamed(virtualName) {
+            targetDisplay = vd
+        } else if let byIndex = DisplayManager.shared.display(at: request.displayIndex) {
+            targetDisplay = byIndex
+        } else {
+            targetDisplay = DisplayManager.shared.mainDisplay()
+        }
+
+        guard let targetDisplayUnwrapped = targetDisplay else {
             appManager?.appendLog("Target display not found")
             return
         }
@@ -58,7 +68,7 @@ class SenderController {
         self.videoEncoder = encoder
         
         // Create screen capture engine
-        let captureEngine = ScreenCaptureEngine(config: request.config, targetDisplay: targetDisplay, encoder: encoder)
+        let captureEngine = ScreenCaptureEngine(config: request.config, targetDisplay: targetDisplayUnwrapped, encoder: encoder)
         self.screenCaptureEngine = captureEngine
         
         do {
@@ -73,12 +83,31 @@ class SenderController {
     }
     
     func stop() {
+        appManager?.appendLog("Stopping sender controller...")
+        
+        // Stop stats timer first
         statsTimer?.invalidate()
         statsTimer = nil
+        
+        // Stop screen capture (like receiver stops decoder)
+        if let capture = screenCaptureEngine {
+            capture.stop()
+            appManager?.appendLog("Screen capture stopped")
+        }
         screenCaptureEngine = nil
+        
+        // Stop video encoder
         videoEncoder = nil
-        transport?.stop()
+        appManager?.appendLog("Video encoder stopped")
+        
+        // Stop and close transport connection
+        if let transport = transport {
+            transport.stop()
+            appManager?.appendLog("Transport stopped")
+        }
         transport = nil
+        
+        appManager?.appendLog("Sender controller stopped")
     }
     
     private func startStatsTimer() {

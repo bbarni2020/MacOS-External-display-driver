@@ -11,19 +11,30 @@ fi
 
 echo "Installing system packages..."
 apt-get update
-apt-get install -y \
-    python3 \
-    gstreamer1.0-tools \
-    gstreamer1.0-plugins-base \
-    gstreamer1.0-plugins-good \
-    gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly \
-    gstreamer1.0-libav \
-    gstreamer1.0-vaapi \
-    gstreamer1.0-omx \
-    libgstreamer1.0-0 \
-    libgstreamer-plugins-base1.0-0 \
+
+packages=(
+    python3
+    gstreamer1.0-tools
+    gstreamer1.0-plugins-base
+    gstreamer1.0-plugins-good
+    gstreamer1.0-plugins-bad
+    gstreamer1.0-plugins-ugly
+    gstreamer1.0-libav
+    gstreamer1.0-vaapi
+    libgstreamer1.0-0
+    libgstreamer-plugins-base1.0-0
+    python3-serial
+    python3-pip
     wmctrl
+)
+
+if apt-cache show gstreamer1.0-omx >/dev/null 2>&1; then
+    packages+=(gstreamer1.0-omx)
+else
+    echo "Package gstreamer1.0-omx not available for this architecture; skipping."
+fi
+
+apt-get install -y "${packages[@]}"
 
 echo "Configuring GPU memory..."
 if ! grep -q "^gpu_mem=" /boot/config.txt; then

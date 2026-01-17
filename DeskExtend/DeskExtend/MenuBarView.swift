@@ -77,13 +77,21 @@ struct MenuBarView: View {
             Divider()
             
             Button("Quit DeskExtend") {
+                // Disconnect first if connected
                 if appManager.isConnected {
                     appManager.disconnect()
                 }
+                
+                // Allow termination
                 if let delegate = NSApplication.shared.delegate as? AppDelegate {
                     delegate.shouldAllowTermination = true
+                    delegate.virtualDisplayManager?.stop()
                 }
-                NSApplication.shared.terminate(nil)
+                
+                // Force immediate termination
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    exit(0)
+                }
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 12)

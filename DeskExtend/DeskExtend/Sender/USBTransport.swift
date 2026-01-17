@@ -83,6 +83,7 @@ final class USBTransport {
     }
 
     func stop() {
+        logCallback?("Stopping USB transport...")
         disconnect()
     }
 }

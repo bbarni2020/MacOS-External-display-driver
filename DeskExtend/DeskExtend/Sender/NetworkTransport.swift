@@ -127,8 +127,14 @@ class NetworkTransport {
         reconnectTimer?.invalidate()
         reconnectTimer = nil
         targetHost = nil
-        connection?.cancel()
+        
+        // Force cancel the connection
+        if let conn = connection {
+            conn.forceCancel()
+            logCallback?("Network connection force-cancelled")
+        }
         connection = nil
+        
         connectedAddress = "Not connected"
         statusCallback?(false, "Not connected")
     }
