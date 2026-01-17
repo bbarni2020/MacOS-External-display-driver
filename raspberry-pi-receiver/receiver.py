@@ -303,18 +303,26 @@ class VideoReceiver:
     def apply_wmctrl_fullscreen(self):
         if not self.has_wmctrl():
             return
+
         window_names = [
             'vaapisink',
             'autovideosink',
             'gst-launch-1.0'
         ]
-        for name in window_names:
+
+        def worker(delay=5.0):
             try:
-                time.sleep(5.0)
-                subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1)
-                return
+                time.sleep(delay)
+                for name in window_names:
+                    try:
+                        subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1)
+                        return
+                    except Exception:
+                        continue
             except Exception:
-                continue
+                return
+
+        threading.Thread(target=worker, daemon=True).start()
     
     def monitor_decoder_errors(self):
         if not self.decoder_process or not self.decoder_process.stderr:
@@ -566,7 +574,6 @@ class VideoReceiver:
                 logger.info(f"Listening on network {self.host}:{self.port}")
                 if not self.bind_socket():
                     time.sleep(3)
-                    continue
                 
                 logger.info("Waiting for network connection...")
                 self.sock.settimeout(2.0)
@@ -610,7 +617,6 @@ class VideoReceiver:
                 except socket.timeout:
                     if self.usb_device:
                         logger.info("No network connection, retrying USB...")
-                    continue
                     
             except Exception as e:
                 if self.running:
