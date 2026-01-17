@@ -100,21 +100,53 @@ class VideoReceiver:
     def hide_firefox_kiosk(self):
         if self.firefox_process and self.firefox_process.poll() is None:
             try:
-                self.firefox_process.terminate()
-                try:
-                    self.firefox_process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    self.firefox_process.kill()
-                logger.info("Firefox kiosk mode stopped")
+                if self.has_wmctrl():
+                    try:
+                        proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
+                        out = proc.stdout if proc.returncode == 0 else ''
+                        for line in out.splitlines():
+                            if 'Firefox' in line or 'firefox' in line or 'waiting.html' in line:
+                                parts = line.split()
+                                if parts:
+                                    win_id = parts[0]
+                                    try:
+                                        subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'add,hidden'], timeout=1)
+                                    except Exception:
+                                        pass
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        os.kill(self.firefox_process.pid, signal.SIGSTOP)
+                    except Exception:
+                        pass
+                logger.info("Firefox kiosk mode hidden (minimized)")
             except Exception:
                 pass
-            self.firefox_process = None
 
     def hide_firefox_kiosk_delayed(self, delay=5.0):
         try:
             threading.Timer(delay, self.hide_firefox_kiosk).start()
         except Exception as e:
             logger.warning(f"Failed to schedule Firefox hide: {e}")
+
+    def stop_firefox_kiosk(self):
+        if self.firefox_process:
+            try:
+                try:
+                    self.firefox_process.terminate()
+                    try:
+                        self.firefox_process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.firefox_process.kill()
+                except Exception:
+                    try:
+                        self.firefox_process.kill()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            self.firefox_process = None
 
     def schedule_hide_when_window_present(self, window_names, appear_timeout=3.0, after_delay=5.0):
         def watcher():
