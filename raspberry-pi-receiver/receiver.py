@@ -109,6 +109,12 @@ class VideoReceiver:
             except Exception:
                 pass
             self.firefox_process = None
+
+    def hide_firefox_kiosk_delayed(self, delay=5.0):
+        try:
+            threading.Timer(delay, self.hide_firefox_kiosk).start()
+        except Exception as e:
+            logger.warning(f"Failed to schedule Firefox hide: {e}")
     
     @staticmethod
     def get_screen_resolution():
@@ -304,6 +310,7 @@ class VideoReceiver:
         ]
         for name in window_names:
             try:
+                time.sleep(5.0)
                 subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1)
                 return
             except Exception:
@@ -473,7 +480,7 @@ class VideoReceiver:
                     time.sleep(3)
                     continue
                 
-                self.hide_firefox_kiosk()
+                self.hide_firefox_kiosk_delayed(5.0)
                 
                 if not self.start_decoder():
                     self.close_usb()
@@ -525,7 +532,7 @@ class VideoReceiver:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if self.open_usb():
                         usb_active = True
-                        self.hide_firefox_kiosk()
+                        self.hide_firefox_kiosk_delayed(5.0)
                         
                         if not self.start_decoder():
                             self.close_usb()
@@ -569,6 +576,7 @@ class VideoReceiver:
                     logger.info(f"Connected from {addr}")
                     
                     self.hide_firefox_kiosk()
+                    self.hide_firefox_kiosk_delayed(5.0)
                     
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
