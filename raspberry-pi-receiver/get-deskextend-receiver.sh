@@ -31,16 +31,28 @@ cp -a "$SRC/." "$DEST/"
 chmod +x "$DEST/receiver.py" 2>/dev/null || true
 chmod +x "$DEST/run.sh" 2>/dev/null || true
 if [ -f "$DEST/requirements.txt" ]; then
-  if command -v pip3 >/dev/null 2>&1; then
-    pip3 install -r "$DEST/requirements.txt"
+  if command -v python3 >/dev/null 2>&1; then
+    echo "Creating Python virtualenv at $DEST/venv and installing requirements..."
+    python3 -m venv "$DEST/venv"
+    "$DEST/venv/bin/python" -m pip install --upgrade pip setuptools wheel
+    "$DEST/venv/bin/pip" install -r "$DEST/requirements.txt"
   else
-    if command -v apt-get >/dev/null 2>&1; then
-      apt-get update
-      apt-get install -y python3-pip
+    if command -v pip3 >/dev/null 2>&1; then
+      echo "python3 not found; installing requirements with pip3 globally..."
       pip3 install -r "$DEST/requirements.txt"
     else
-      echo "pip3 not found and apt-get unavailable; please install Python requirements manually"
+      if command -v apt-get >/dev/null 2>&1; then
+        echo "Installing python3 and pip via apt-get..."
+        apt-get update
+        apt-get install -y python3 python3-venv python3-pip
+        python3 -m venv "$DEST/venv"
+        "$DEST/venv/bin/python" -m pip install --upgrade pip setuptools wheel
+        "$DEST/venv/bin/pip" install -r "$DEST/requirements.txt"
+      else
+        echo "python3/pip3 not found and apt-get unavailable; please install Python and requirements manually"
+      fi
     fi
   fi
+  echo "To activate the virtualenv: . \"$DEST/venv/bin/activate\""
 fi
 echo "Installed $FOLDER to $DEST"
