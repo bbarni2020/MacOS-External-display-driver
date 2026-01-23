@@ -6,15 +6,10 @@ FOLDER="raspberry-pi-receiver"
 DEST="/opt/DeskExtend-receiver"
 for arg in "$@"; do
   case "$arg" in
-    repo=*) REPO="${arg#repo=}" ;;
     branch=*) BRANCH="${arg#branch=}" ;;
     dest=*) DEST="${arg#dest=}" ;;
   esac
 done
-if [ -z "$REPO" ]; then
-  echo "Usage: curl -sSL <raw-url>/get-deskextend-receiver.sh | sh -s -- repo=owner/repo [branch=main] [dest=/opt/DeskExtend-receiver]"
-  exit 1
-fi
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 ZIP="$TMPDIR/repo.zip"
