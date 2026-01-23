@@ -3,7 +3,7 @@ set -e
 REPO="bbarni2020/MacOS-External-display-driver"
 BRANCH="main"
 FOLDER="raspberry-pi-receiver"
-DEST="/opt/DeskExtend-receiver"
+DEST="${PWD}/receiver"
 for arg in "$@"; do
   case "$arg" in
     branch=*) BRANCH="${arg#branch=}" ;;
