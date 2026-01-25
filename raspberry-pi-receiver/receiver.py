@@ -105,6 +105,10 @@ class VideoReceiver:
         for pattern in patterns:
             devices.extend(glob.glob(pattern))
         return devices
+
+    def detect_usb_device(self):
+        devices = self.detect_all_devices()
+        return devices[0] if devices else None
     
     def start_firefox_kiosk(self):
         if self.firefox_process and self.firefox_process.poll() is None:
