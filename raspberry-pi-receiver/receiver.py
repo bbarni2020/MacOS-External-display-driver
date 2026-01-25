@@ -180,8 +180,7 @@ class VideoReceiver:
                 try:
                     self.firefox_process.terminate()
                     try:
-                        self.firefox_proce
-                        ss.wait(timeout=2)
+                        self.firefox_process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
                         self.firefox_process.kill()
                 except Exception:
@@ -233,7 +232,7 @@ class VideoReceiver:
     def get_screen_resolution():
         try:
             result = subprocess.run(
-                "xrandr | grep '\*' | tr -s ' ' | cut -d' ' -f2",
+                r"xrandr | grep '\*' | tr -s ' ' | cut -d' ' -f2",
                 shell=True,
                 capture_output=True,
                 text=True,
