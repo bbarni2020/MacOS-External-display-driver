@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeskExtend Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -11,7 +14,7 @@
             box-sizing: border-box;
         }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Montserrat', sans-serif;
             background: #0a0a0a;
             color: #e0e0e0;
             height: 100vh;
@@ -27,40 +30,75 @@
             text-align: center;
         }
         .time {
-            font-size: 8vw;
+            font-size: 12vw;
             font-weight: 300;
-            margin-bottom: 10px;
+            margin-bottom: 20px;
+            letter-spacing: 2px;
         }
         .date {
-            font-size: 3vw;
+            font-size: 2vw;
             color: #b0b0b0;
+            font-weight: 400;
         }
         .stats {
             position: absolute;
-            bottom: 20px;
-            right: 20px;
-            background: rgba(0,0,0,0.8);
-            padding: 20px;
-            border-radius: 10px;
-            font-size: 1.2em;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 40px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 20px;
+            padding: 30px 40px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
         .stat {
+            text-align: center;
+            min-width: 120px;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            color: #ccc;
             margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .stat-value {
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 15px;
         }
         .bar {
-            background: #333;
-            height: 10px;
-            border-radius: 5px;
-            margin-top: 5px;
+            background: rgba(255,255,255,0.1);
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
         }
         .bar-fill {
             height: 100%;
-            border-radius: 5px;
-            transition: width 0.5s;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+            background: linear-gradient(90deg, #ff6b6b, #ff8e53);
         }
-        .cpu .bar-fill { background: #ff6b6b; }
-        .ram .bar-fill { background: #4ecdc4; }
-        .storage .bar-fill { background: #45b7d1; }
+        .ram .bar-fill { background: linear-gradient(90deg, #4ecdc4, #44a08d); }
+        .storage .bar-fill { background: linear-gradient(90deg, #45b7d1, #2980b9); }
+        .temp .bar-fill { background: linear-gradient(90deg, #ff9ff3, #f368e0); }
+        .internet-status {
+            position: absolute;
+            top: 30px;
+            right: 30px;
+            font-size: 0.9em;
+            font-weight: 400;
+            color: #ff6b6b;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .internet-status.online {
+            color: #4ecdc4;
+        }
     </style>
 </head>
 <body>
@@ -70,24 +108,36 @@
             <div class="date" id="date"></div>
         </div>
     </div>
+    <div class="internet-status" id="internet-status">
+        <span id="status-text">Checking...</span>
+    </div>
     <div class="stats">
         <div class="stat cpu">
-            <div>CPU: <span id="cpu">0</span>%</div>
+            <div class="stat-label">CPU</div>
+            <div class="stat-value"><span id="cpu">0</span>%</div>
             <div class="bar"><div class="bar-fill" id="cpu-bar" style="width: 0%"></div></div>
         </div>
         <div class="stat ram">
-            <div>RAM: <span id="ram">0</span>%</div>
+            <div class="stat-label">RAM</div>
+            <div class="stat-value"><span id="ram">0</span>%</div>
             <div class="bar"><div class="bar-fill" id="ram-bar" style="width: 0%"></div></div>
         </div>
         <div class="stat storage">
-            <div>Storage: <span id="storage">0</span>%</div>
+            <div class="stat-label">STORAGE</div>
+            <div class="stat-value"><span id="storage">0</span>%</div>
             <div class="bar"><div class="bar-fill" id="storage-bar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat temp">
+            <div class="stat-label">TEMP</div>
+            <div class="stat-value"><span id="temp">0</span>°C</div>
+            <div class="bar"><div class="bar-fill" id="temp-bar" style="width: 0%"></div></div>
         </div>
     </div>
     <script>
         function updateTime() {
             const now = new Date();
-            document.getElementById('time').textContent = now.toLocaleTimeString('en-US', {hour12: false});
+            const timeString = now.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'});
+            document.getElementById('time').textContent = timeString;
             document.getElementById('date').textContent = now.toLocaleDateString('en-US', {weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'});
         }
         function updateStats() {
@@ -100,13 +150,28 @@
                     document.getElementById('ram-bar').style.width = data.ram + '%';
                     document.getElementById('storage').textContent = data.storage;
                     document.getElementById('storage-bar').style.width = data.storage + '%';
+                    document.getElementById('temp').textContent = data.temp;
+                    document.getElementById('temp-bar').style.width = Math.min(data.temp / 80 * 100, 100) + '%';
                 })
                 .catch(err => console.error('Failed to fetch stats:', err));
         }
+        function checkInternet() {
+            fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' })
+                .then(() => {
+                    document.getElementById('internet-status').classList.add('online');
+                    document.getElementById('status-text').textContent = 'Online';
+                })
+                .catch(() => {
+                    document.getElementById('internet-status').classList.remove('online');
+                    document.getElementById('status-text').textContent = 'Offline';
+                });
+        }
         updateTime();
         updateStats();
+        checkInternet();
         setInterval(updateTime, 1000);
         setInterval(updateStats, 5000);
+        setInterval(checkInternet, 10000);
     </script>
 </body>
 </html>

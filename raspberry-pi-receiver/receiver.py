@@ -53,8 +53,13 @@ class VideoReceiver:
         self.app = None
         self.web_thread = None
     
-    
-    def start_web_server(self):
+    def get_cpu_temp(self):
+        try:
+            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                temp = int(f.read().strip()) / 1000
+            return round(temp, 1)
+        except:
+            return 0
         if not Flask or not psutil:
             return
         if self.app:
@@ -76,7 +81,8 @@ class VideoReceiver:
             cpu = psutil.cpu_percent(interval=1)
             ram = psutil.virtual_memory().percent
             storage = psutil.disk_usage('/').percent
-            return {'cpu': round(cpu), 'ram': round(ram), 'storage': round(storage)}
+            temp = get_cpu_temp()
+            return {'cpu': round(cpu), 'ram': round(ram), 'storage': round(storage), 'temp': temp}
         
         def run_server():
             self.app.run(host='127.0.0.1', port=8080, debug=False, use_reloader=False)
