@@ -14,6 +14,15 @@ try:
 except Exception:
     serial = None
 import glob
+try:
+    from flask import Flask, render_template
+    from dotenv import load_dotenv
+    import psutil
+except Exception:
+    Flask = None
+    render_template = None
+    load_dotenv = None
+    psutil = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +50,39 @@ class VideoReceiver:
         self.current_fps = 0
         self.decoder_type = None
         self.bytes_received = 0
+        self.app = None
+        self.web_thread = None
+    
+    
+    def start_web_server(self):
+        if not Flask or not psutil:
+            return
+        if self.app:
+            return
+        load_dotenv()
+        display_mode = os.getenv('DISPLAY_MODE', 'dashboard')
+        template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+        self.app = Flask(__name__, template_folder=template_dir)
+        
+        @self.app.route('/')
+        def dashboard():
+            if display_mode == 'waiting':
+                return render_template('waiting.html')
+            else:
+                return render_template('dashboard.html')
+        
+        @self.app.route('/stats')
+        def stats():
+            cpu = psutil.cpu_percent(interval=1)
+            ram = psutil.virtual_memory().percent
+            storage = psutil.disk_usage('/').percent
+            return {'cpu': round(cpu), 'ram': round(ram), 'storage': round(storage)}
+        
+        def run_server():
+            self.app.run(host='127.0.0.1', port=8080, debug=False, use_reloader=False)
+        
+        self.web_thread = threading.Thread(target=run_server, daemon=True)
+        self.web_thread.start()
     
     @staticmethod
     def detect_usb_device():
@@ -63,10 +105,7 @@ class VideoReceiver:
         if self.firefox_process and self.firefox_process.poll() is None:
             return True
 
-        waiting_html = get_waiting_html_path()
-        if not os.path.exists(waiting_html):
-            logger.warning(f"waiting.html not found at {waiting_html}")
-            return False
+        self.start_web_server()
         
         try:
             env = os.environ.copy()
@@ -74,12 +113,12 @@ class VideoReceiver:
                 env['DISPLAY'] = ':0'
             
             self.firefox_process = subprocess.Popen(
-                ['firefox', '--kiosk', f'file://{waiting_html}'],
+                ['firefox', '--kiosk', 'http://127.0.0.1:8080/'],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            logger.info("Firefox kiosk mode started with waiting.html")
+            logger.info("Firefox kiosk mode started with display")
             return True
         except Exception as e:
             logger.warning(f"Failed to start Firefox: {e}")
@@ -105,7 +144,7 @@ class VideoReceiver:
                         proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
                         out = proc.stdout if proc.returncode == 0 else ''
                         for line in out.splitlines():
-                            if 'Firefox' in line or 'firefox' in line or 'waiting.html' in line:
+                            if 'Firefox' in line or 'firefox' in line:
                                 parts = line.split()
                                 if parts:
                                     win_id = parts[0]
@@ -472,7 +511,6 @@ class VideoReceiver:
             self.last_fps_time = now
     
     def read_from_connection(self, conn, chunk_size=262144):
-        """Read from socket or serial connection"""
         try:
             if serial and hasattr(serial, 'Serial') and isinstance(conn, serial.Serial):
                 return conn.read(min(chunk_size, 4096)) if conn.in_waiting else b''
@@ -607,7 +645,6 @@ class VideoReceiver:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if self.open_usb():
                         usb_active = True
-                        # Start watcher for decoder windows, then hide Firefox after detection+delay
                         self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                         
                         if not self.start_decoder():

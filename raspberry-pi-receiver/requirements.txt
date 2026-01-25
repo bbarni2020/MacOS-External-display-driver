@@ -1,1 +1,4 @@
 pyserial>=3.5
+psutil>=5.9.0
+flask>=2.3.0
+python-dotenv>=1.0.0
