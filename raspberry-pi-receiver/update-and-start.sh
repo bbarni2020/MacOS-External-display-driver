@@ -60,4 +60,5 @@ if [ -f "$DEST/requirements.txt" ]; then
 fi
 
 echo "Update complete. Starting DeskExtend Receiver..."
-exec ./run.sh
+exec chmod +x "$DEST/receiver.py" 2>/dev/null || true
+exec "$DEST/receiver.py"
