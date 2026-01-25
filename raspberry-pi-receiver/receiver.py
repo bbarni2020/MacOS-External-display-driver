@@ -60,6 +60,8 @@ class VideoReceiver:
             return round(temp, 1)
         except:
             return 0
+    
+    def start_web_server(self):
         if not Flask or not psutil:
             return
         if self.app:
@@ -81,7 +83,7 @@ class VideoReceiver:
             cpu = psutil.cpu_percent(interval=1)
             ram = psutil.virtual_memory().percent
             storage = psutil.disk_usage('/').percent
-            temp = get_cpu_temp()
+            temp = self.get_cpu_temp()
             return {'cpu': round(cpu), 'ram': round(ram), 'storage': round(storage), 'temp': temp}
         
         def run_server():
@@ -89,9 +91,6 @@ class VideoReceiver:
         
         self.web_thread = threading.Thread(target=run_server, daemon=True)
         self.web_thread.start()
-    
-    @staticmethod
-    def detect_usb_device():
         patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*']
         for pattern in patterns:
             devices = glob.glob(pattern)
