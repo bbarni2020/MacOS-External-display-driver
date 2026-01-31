@@ -15,12 +15,13 @@ except Exception:
     serial = None
 import glob
 try:
-    from flask import Flask, render_template
+    from flask import Flask, render_template, jsonify
     from dotenv import load_dotenv
     import psutil
 except Exception:
     Flask = None
     render_template = None
+    jsonify = None
     load_dotenv = None
     psutil = None
 
@@ -52,6 +53,7 @@ class VideoReceiver:
         self.bytes_received = 0
         self.app = None
         self.web_thread = None
+        self.startup_flag = {'play': False}
     
     def get_cpu_temp(self):
         try:
@@ -131,6 +133,18 @@ class VideoReceiver:
                 return {'title': title, 'artist': artist, 'cover': cover}
             except Exception as e:
                 return {'title': 'Test', 'artist': 'Test', 'cover': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ1UNczaI40MyPgXd6D9W8y34zEG-JHQTnQ5Q&s'}
+        
+        @self.app.route('/start', methods=['POST'])
+        def start_animation():
+            self.startup_flag['play'] = True
+            return jsonify({'ok': True})
+
+        @self.app.route('/start-status')
+        def start_status():
+            if self.startup_flag['play']:
+                self.startup_flag['play'] = False
+                return jsonify({'play': True})
+            return jsonify({'play': False})
         
         def run_server():
             self.app.run(host='127.0.0.1', port=8080, debug=False, use_reloader=False)

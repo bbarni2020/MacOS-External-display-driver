@@ -44,7 +44,7 @@
             font-size: 7vw;
             font-weight: 400;
             letter-spacing: 0.05em;
-            margin-bottom: 0.4em;
+            margin-bottom: 0.2em;
             color: #b0b0b8;
             opacity: 0.7;
             transition: color 0.5s, opacity 0.5s;
@@ -62,7 +62,7 @@
             align-items: center;
             gap: 1em;
             font-size: 1.1vw;
-            color: #6fa7c7;
+            color: #1b5e3c;
             margin-bottom: 2em;
             font-weight: 500;
             opacity: 0.5;
@@ -142,8 +142,8 @@
         .spotify-widget {
             position: absolute;
             left: 50%;
-            bottom: calc(10vw + 10px);
-            transform: translateX(-50%);
+            bottom: calc(3.5vw + 38px + 50px);
+            transform: translateX(-50%) translateY(20px);
             min-width: 220px;
             max-width: 340px;
             background: rgba(30,30,30,0.85);
@@ -158,7 +158,14 @@
             backdrop-filter: blur(8px);
             color: #e0e0e0;
             font-size: 1em;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s cubic-bezier(.4,0,.2,1), transform 0.35s cubic-bezier(.4,0,.2,1);
+        }
+        .spotify-widget.visible {
             opacity: 0.7;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
         }
         .spotify-cover {
             width: 36px;
@@ -186,7 +193,7 @@
         }
         .spotify-artist {
             font-size: 0.92em;
-            color: #6fa7c7;
+            color: #888ca0;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -199,6 +206,71 @@
             margin-left: auto;
             opacity: 0.5;
         }
+        @keyframes fadeInUp {
+            0% {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        @keyframes fadeOut {
+            0% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+        }
+        #startup-logo span {
+            display: inline-block;
+            animation: fadeInUp 0.8s ease forwards paused;
+            opacity: 0;
+            transform: translateY(30px);
+            visibility: hidden;
+        }
+        #startup-logo.animate span {
+            animation-play-state: running;
+        }
+        #startup-logo span:nth-child(1) { animation-delay: 0s; }
+        #startup-logo span:nth-child(2) { animation-delay: 0.08s; }
+        #startup-logo span:nth-child(3) { animation-delay: 0.16s; }
+        #startup-logo span:nth-child(4) { animation-delay: 0.24s; }
+        #startup-logo span:nth-child(5) { animation-delay: 0.32s; }
+        #startup-logo span:nth-child(6) { animation-delay: 0.4s; }
+        #startup-logo span:nth-child(7) { animation-delay: 0.48s; }
+        #startup-logo span:nth-child(8) { animation-delay: 0.56s; }
+        #startup-logo span:nth-child(9) { animation-delay: 0.64s; }
+        #startup-logo span:nth-child(10) { animation-delay: 0.72s; }
+        #startup-logo span:nth-child(11) { animation-delay: 0.8s; }
+        #startup-overlay {
+            opacity: 0;
+            transition: opacity 0.35s ease;
+        }
+        #startup-overlay.visible {
+            opacity: 1;
+        }
+        #startup-overlay::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-image: radial-gradient(circle, rgba(255,255,255,0.95) 2px, transparent 2px);
+            background-size: 34px 34px;
+            opacity: 0.06;
+            pointer-events: none;
+            z-index: 1;
+        }
+        #startup-overlay > #startup-logo {
+            position: relative;
+            z-index: 2;
+        }
+        body.animating .main {
+            display: none;
+        }
         @media (max-width: 900px) {
             .time { font-size: 12vw; }
             .date, .weather { font-size: 3vw; }
@@ -210,6 +282,11 @@
     </style>
 </head>
 <body>
+    <div id="startup-overlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;pointer-events:none;display:none;align-items:center;justify-content:center;flex-direction:column;background:#0c140b;color:#fff;">
+        <div id="startup-logo" style="font-size:8vw;font-weight:900;color:#fff;letter-spacing:0.02em;text-shadow:0 2px 4px rgba(0,0,0,0.12);">
+            <span>W</span><span>e</span><span>l</span><span>c</span><span>o</span><span>m</span><span>e</span> <span>b</span><span>a</span><span>c</span><span>k</span>
+        </div>
+    </div>
     <div class="main">
         <div class="time" id="time"></div>
         <div class="date" id="date"></div>
@@ -218,7 +295,7 @@
             <span id="weather-desc"></span>
             <span id="weather-temp"></span>
         </div>
-        <div class="spotify-widget" id="spotify-widget" style="display:none;">
+        <div class="spotify-widget" id="spotify-widget">
             <img class="spotify-cover" id="spotify-cover" src="" alt=""/>
             <div class="spotify-info">
                 <div class="spotify-title" id="spotify-title"></div>
@@ -253,6 +330,57 @@
         <span id="status-text">Offline</span>
     </div>
     <script>
+        function playStartupAnimation() {
+            const overlay = document.getElementById('startup-overlay');
+            const logo = document.getElementById('startup-logo');
+            const body = document.body;
+            overlay.style.display = 'flex';
+            requestAnimationFrame(() => {
+                overlay.classList.add('visible');
+            });
+            body.classList.add('animating');
+            setTimeout(() => {
+                logo.classList.add('animate');
+                const spans = logo.querySelectorAll('span');
+                spans.forEach(span => span.style.visibility = 'visible');
+            }, 200);
+            setTimeout(() => {
+                const spans = logo.querySelectorAll('span');
+                spans.forEach((span, index) => {
+                    setTimeout(() => {
+                        span.style.animation = 'fadeOut 0.5s ease forwards';
+                    }, (spans.length - 1 - index) * 100);
+                });
+                const fadeOutDuration = 500;
+                const maxDelay = (spans.length - 1) * 100;
+                const overlayTransition = 350;
+                setTimeout(() => {
+                    overlay.classList.remove('visible');
+                    setTimeout(() => {
+                        overlay.style.display = 'none';
+                        body.classList.remove('animating');
+                        logo.classList.remove('animate');
+                        spans.forEach(span => {
+                            span.style.animation = '';
+                            span.style.visibility = 'hidden';
+                        });
+                    }, overlayTransition);
+                }, maxDelay + fadeOutDuration + 50);
+            }, 3200);
+        }
+
+        // Listen for /start-status endpoint
+        async function pollStartStatus() {
+            try {
+                const resp = await fetch('/start-status');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.play) playStartupAnimation();
+                }
+            } catch (e) {}
+            setTimeout(pollStartStatus, 1500);
+        }
+        pollStartStatus();
         function updateTime() {
             const now = new Date();
             const timeString = now.toLocaleTimeString('en-US', {hour12: false, hour: '2-digit', minute: '2-digit'});
@@ -307,17 +435,18 @@
             fetch('/spotify')
                 .then(r => r.json())
                 .then(data => {
+                    const widget = document.getElementById('spotify-widget');
                     if (data && data.title) {
                         document.getElementById('spotify-title').textContent = data.title;
                         document.getElementById('spotify-artist').textContent = data.artist;
                         document.getElementById('spotify-cover').src = data.cover || '';
-                        document.getElementById('spotify-widget').style.display = '';
+                        widget.classList.add('visible');
                     } else {
-                        document.getElementById('spotify-widget').style.display = 'none';
+                        widget.classList.remove('visible');
                     }
                 })
                 .catch(() => {
-                    document.getElementById('spotify-widget').style.display = 'none';
+                    document.getElementById('spotify-widget').classList.remove('visible');
                 });
         }
         updateTime();
@@ -328,7 +457,7 @@
         setInterval(updateTime, 1000);
         setInterval(updateStats, 5000);
         setInterval(checkInternet, 10000);
-        setInterval(updateWeather, 600000);
+        setInterval(updateWeather, 1800000);
         setInterval(updateSpotify, 5000);
     </script>
 </body>
