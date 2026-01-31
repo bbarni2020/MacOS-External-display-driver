@@ -1,3 +1,4 @@
 /macos-sender/.build
 /DeskExtend/build
 *.pyc
+*.env

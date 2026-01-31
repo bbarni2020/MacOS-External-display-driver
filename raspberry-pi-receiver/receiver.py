@@ -63,11 +63,14 @@ class VideoReceiver:
     
     def start_web_server(self):
         if not Flask or not psutil:
+            print("Flask or psutil not available, skipping web server start")
             return
         if self.app:
+            print("Web server already running")
             return
         load_dotenv()
         display_mode = os.getenv('DISPLAY_MODE', 'dashboard')
+        print(f"Display mode: {display_mode}")
         template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
         self.app = Flask(__name__, template_folder=template_dir)
         
@@ -85,6 +88,49 @@ class VideoReceiver:
             storage = psutil.disk_usage('/').percent
             temp = self.get_cpu_temp()
             return {'cpu': round(cpu), 'ram': round(ram), 'storage': round(storage), 'temp': temp}
+
+        @self.app.route('/weather')
+        def weather():
+            import requests
+            try:
+                resp = requests.get('https://wttr.in/?format=j1', timeout=3)
+                data = resp.json()
+                current = data['current_condition'][0]
+                temp = current.get('temp_C')
+                desc = current.get('weatherDesc', [{}])[0].get('value', '')
+                icon = current.get('weatherIconUrl', [{}])[0].get('value', '')
+                return {'temp': temp, 'desc': desc, 'icon': icon}
+            except Exception as e:
+                return {'temp': '', 'desc': '', 'icon': ''}
+
+        @self.app.route('/spotify')
+        def spotify():
+            try:
+                import spotipy
+                from spotipy.oauth2 import SpotifyOAuth
+                import os
+                client_id = os.getenv('SPOTIPY_CLIENT_ID')
+                client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
+                redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI', 'http://localhost:8888/callback')
+                if not (client_id and client_secret):
+                    raise Exception('Spotify credentials not set')
+                sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    redirect_uri=redirect_uri,
+                    scope='user-read-currently-playing user-read-playback-state',
+                    open_browser=False
+                ))
+                current = sp.current_user_playing_track()
+                if not current or not current.get('item'):
+                    return {'title': '', 'artist': '', 'cover': ''}
+                item = current['item']
+                title = item['name']
+                artist = ', '.join([a['name'] for a in item['artists']])
+                cover = item['album']['images'][0]['url'] if item['album']['images'] else ''
+                return {'title': title, 'artist': artist, 'cover': cover}
+            except Exception as e:
+                return {'title': 'Test', 'artist': 'Test', 'cover': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ1UNczaI40MyPgXd6D9W8y34zEG-JHQTnQ5Q&s'}
         
         def run_server():
             self.app.run(host='127.0.0.1', port=8080, debug=False, use_reloader=False)
@@ -114,8 +160,11 @@ class VideoReceiver:
         if self.firefox_process and self.firefox_process.poll() is None:
             return True
 
-        self.start_web_server()
-        
+        try:
+            self.start_web_server()
+        except Exception as e:
+            logger.error(f"Failed to start web server: {e}")
+
         try:
             env = os.environ.copy()
             if 'DISPLAY' not in env:
