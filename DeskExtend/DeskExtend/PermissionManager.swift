@@ -13,13 +13,18 @@ final class PermissionManager: ObservableObject {
     
     func checkPermissions() {
         Task { @MainActor in
+            try? await Task.yield()
             do {
                 let displays = try await SCShareableContent.current.displays
-                self.hasScreenRecordingPermission = !displays.isEmpty
-                self.permissionStatus = self.hasScreenRecordingPermission ? "Granted" : "Not Granted"
+                DispatchQueue.main.async {
+                    self.hasScreenRecordingPermission = !displays.isEmpty
+                    self.permissionStatus = self.hasScreenRecordingPermission ? "Granted" : "Not Granted"
+                }
             } catch {
-                self.hasScreenRecordingPermission = false
-                self.permissionStatus = "Error: \(error.localizedDescription)"
+                DispatchQueue.main.async {
+                    self.hasScreenRecordingPermission = false
+                    self.permissionStatus = "Error: \(error.localizedDescription)"
+                }
             }
         }
     }

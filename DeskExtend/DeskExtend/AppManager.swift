@@ -27,6 +27,13 @@ final class AppManager: ObservableObject {
     @Published var usbDevice: String = ConfigurationManager.shared.usbDevice {
         didSet { ConfigurationManager.shared.usbDevice = usbDevice }
     }
+    @Published var usbDevices: [String] = []
+    func refreshUsbDevices() {
+        usbDevices = USBDeviceDetector.allDevices()
+        if let first = usbDevices.first, usbDevice.isEmpty {
+            usbDevice = first
+        }
+    }
     @Published var virtualDisplayName: String = ConfigurationManager.shared.virtualDisplayName {
         didSet { ConfigurationManager.shared.virtualDisplayName = virtualDisplayName }
     }

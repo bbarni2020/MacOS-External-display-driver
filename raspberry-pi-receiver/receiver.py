@@ -15,13 +15,16 @@ except Exception:
     serial = None
 import glob
 try:
-    from flask import Flask, render_template, jsonify
+    from flask import Flask, render_template, jsonify, request, redirect, url_for
     from dotenv import load_dotenv
     import psutil
 except Exception:
     Flask = None
     render_template = None
     jsonify = None
+    request = None
+    redirect = None
+    url_for = None
     load_dotenv = None
     psutil = None
 
@@ -113,26 +116,66 @@ class VideoReceiver:
                 import os
                 client_id = os.getenv('SPOTIPY_CLIENT_ID')
                 client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
-                redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI', 'http://localhost:8888/callback')
+                redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI', 'http://127.0.0.1:8080/callback')
+                cache_path = os.getenv('SPOTIPY_CACHE', '.spotify-token-cache')
+                scope = 'user-read-currently-playing user-read-playback-state'
                 if not (client_id and client_secret):
-                    raise Exception('Spotify credentials not set')
-                sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    redirect_uri=redirect_uri,
-                    scope='user-read-currently-playing user-read-playback-state',
-                    open_browser=False
-                ))
+                    return {'authorized': False, 'authorize_url': None}
+                auth_manager = SpotifyOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri, scope=scope, cache_path=cache_path, open_browser=False)
+                token_info = auth_manager.get_cached_token()
+                if not token_info:
+                    return {'authorized': False, 'authorize_url': auth_manager.get_authorize_url()}
+                sp = spotipy.Spotify(auth_manager=auth_manager)
                 current = sp.current_user_playing_track()
                 if not current or not current.get('item'):
-                    return {'title': '', 'artist': '', 'cover': ''}
+                    return {'authorized': True, 'title': '', 'artist': '', 'cover': ''}
                 item = current['item']
                 title = item['name']
                 artist = ', '.join([a['name'] for a in item['artists']])
                 cover = item['album']['images'][0]['url'] if item['album']['images'] else ''
-                return {'title': title, 'artist': artist, 'cover': cover}
+                return {'authorized': True, 'title': title, 'artist': artist, 'cover': cover}
             except Exception as e:
-                return {'title': 'Test', 'artist': 'Test', 'cover': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ1UNczaI40MyPgXd6D9W8y34zEG-JHQTnQ5Q&s'}
+                logger.exception('Spotify fetch failed')
+                return {'authorized': False, 'authorize_url': None}
+
+        @self.app.route('/spotify/login')
+        def spotify_login():
+            import os
+            from spotipy.oauth2 import SpotifyOAuth
+            client_id = os.getenv('SPOTIPY_CLIENT_ID')
+            client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
+            redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI', 'http://127.0.0.1:8080/callback')
+            cache_path = os.getenv('SPOTIPY_CACHE', '.spotify-token-cache')
+            if not (client_id and client_secret):
+                return 'Spotify credentials not configured', 400
+            auth_manager = SpotifyOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri, scope='user-read-currently-playing user-read-playback-state', cache_path=cache_path)
+            return redirect(auth_manager.get_authorize_url())
+
+        @self.app.route('/callback')
+        def spotify_callback():
+            try:
+                error = request.args.get('error')
+                code = request.args.get('code')
+                if error:
+                    return render_template('spotify_callback.html', ok=False, error=error)
+                if not code:
+                    return render_template('spotify_callback.html', ok=False, error='missing code'), 400
+                import os
+                from spotipy.oauth2 import SpotifyOAuth
+                client_id = os.getenv('SPOTIPY_CLIENT_ID')
+                client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
+                redirect_uri = os.getenv('SPOTIPY_REDIRECT_URI', 'http://127.0.0.1:8080/callback')
+                cache_path = os.getenv('SPOTIPY_CACHE', '.spotify-token-cache')
+                if not (client_id and client_secret):
+                    return render_template('spotify_callback.html', ok=False, error='credentials not set'), 400
+                auth_manager = SpotifyOAuth(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri, scope='user-read-currently-playing user-read-playback-state', cache_path=cache_path)
+                token_info = auth_manager.get_access_token(code)
+                if not token_info:
+                    return render_template('spotify_callback.html', ok=False, error='token exchange failed'), 500
+                return render_template('spotify_callback.html', ok=True)
+            except Exception as e:
+                logger.exception('Spotify callback failed')
+                return render_template('spotify_callback.html', ok=False, error=str(e)), 500
         
         @self.app.route('/start', methods=['POST'])
         def start_animation():
@@ -160,11 +203,12 @@ class VideoReceiver:
     
     @staticmethod
     def detect_all_devices():
+        patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*', '/dev/tty.*', '/dev/cu.*', '/dev/serial/by-id/*']
         devices = []
-        patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*']
         for pattern in patterns:
             devices.extend(glob.glob(pattern))
-        return devices
+        unique = sorted(set(devices))
+        return unique
 
     def detect_usb_device(self):
         devices = self.detect_all_devices()
@@ -660,10 +704,31 @@ class VideoReceiver:
         
         while self.running:
             try:
-                if not self.open_usb():
-                    logger.warning("Retrying USB connection in 3 seconds...")
-                    time.sleep(3)
-                    continue
+                if self.usb_device:
+                    opened = self.open_usb()
+                    if not opened:
+                        opened = False
+                        for dev in self.detect_all_devices():
+                            self.usb_device = dev
+                            if self.open_usb():
+                                opened = True
+                                break
+                        if not opened:
+                            logger.warning("Retrying USB connection in 3 seconds...")
+                            time.sleep(3)
+                            continue
+                else:
+                    opened = False
+                    for dev in self.detect_all_devices():
+                        self.usb_device = dev
+                        if self.open_usb():
+                            opened = True
+                            break
+                    if not opened:
+                        logger.warning("No USB device found, retrying in 3 seconds...")
+                        time.sleep(3)
+                        continue
+
                 self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                 
                 if not self.start_decoder():
@@ -714,10 +779,23 @@ class VideoReceiver:
             try:
                 if self.usb_device and not usb_active:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
-                    if self.open_usb():
+                    if not self.open_usb():
+                        opened = False
+                        for dev in self.detect_all_devices():
+                            self.usb_device = dev
+                            if self.open_usb():
+                                opened = True
+                                break
+                        if not opened:
+                            logger.warning("USB connection failed, falling back to network...")
+                            self.usb_device = None
+                        else:
+                            usb_active = True
+                    else:
                         usb_active = True
+
+                    if usb_active:
                         self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
-                        
                         if not self.start_decoder():
                             self.close_usb()
                             usb_active = False
@@ -727,11 +805,9 @@ class VideoReceiver:
                             self.frame_count = 0
                             self.bytes_received = 0
                             self.last_fps_time = time.time()
-                            
                             usb_success = self.process_stream(self.serial_conn)
                             self.close_usb()
                             usb_active = False
-                            
                             if self.decoder_process:
                                 self.decoder_process.terminate()
                                 try:
@@ -739,13 +815,10 @@ class VideoReceiver:
                                 except subprocess.TimeoutExpired:
                                     self.decoder_process.kill()
                                 self.decoder_process = None
-                            
                             logger.info("USB connection closed")
                             self.show_firefox_kiosk()
                             time.sleep(1)
                             continue
-                    else:
-                        logger.warning("USB connection failed, falling back to network...")
                 
                 logger.info(f"Listening on network {self.host}:{self.port}")
                 if not self.bind_socket():

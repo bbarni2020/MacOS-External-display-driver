@@ -273,9 +273,33 @@ struct ConnectionTabView: View {
                 if appManager.connectionMode != .network {
                     GlassCard(title: "USB Device", value: usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput) {
                         VStack(spacing: 8) {
+                            if !appManager.usbDevices.isEmpty {
+                                Picker("USB", selection: $appManager.usbDevice) {
+                                    ForEach(appManager.usbDevices, id: \.self) { dev in
+                                        Text(dev).tag(dev)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: .infinity)
+                            }
                             TextField("/dev/cu.usbmodemXXXX", text: $usbDeviceInput)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.system(size: 11, design: .monospaced))
+                            HStack(spacing: 8) {
+                                Button(action: { appManager.refreshUsbDevices() }) {
+                                    Label("Rescan", systemImage: "arrow.clockwise")
+                                }
+                                .buttonStyle(.bordered)
+                                Spacer()
+                                Button(action: {
+                                    appManager.usbDevice = usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput
+                                    usbDeviceInput = appManager.usbDevice
+                                }) {
+                                    Label("Use Manual", systemImage: "pencil")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
                         }
                     }
                 }
@@ -370,6 +394,7 @@ struct ConnectionTabView: View {
             if usbDeviceInput.isEmpty {
                 usbDeviceInput = appManager.usbDevice
             }
+            appManager.refreshUsbDevices()
         }
     }
 }

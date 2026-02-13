@@ -2,3 +2,4 @@
 /DeskExtend/build
 *.pyc
 *.env
+.spotify-token-cache

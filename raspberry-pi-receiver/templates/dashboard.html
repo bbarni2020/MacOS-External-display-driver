@@ -441,14 +441,33 @@
                 .then(r => r.json())
                 .then(data => {
                     const widget = document.getElementById('spotify-widget');
-                    if (data && data.title) {
-                        document.getElementById('spotify-title').textContent = data.title;
-                        document.getElementById('spotify-artist').textContent = data.artist;
-                        document.getElementById('spotify-cover').src = data.cover || '';
+                    widget.onclick = null;
+                    widget.style.cursor = 'default';
+                    if (!data) { widget.classList.remove('visible'); return; }
+
+                    if (data.authorized === false && data.authorize_url) {
+                        document.getElementById('spotify-title').textContent = 'Log in to Spotify';
+                        document.getElementById('spotify-artist').textContent = 'Tap to authorize';
+                        document.getElementById('spotify-cover').src = document.querySelector('.spotify-logo').src;
                         widget.classList.add('visible');
-                    } else {
-                        widget.classList.remove('visible');
+                        widget.style.cursor = 'pointer';
+                        widget.onclick = function() { window.open(data.authorize_url, '_blank'); };
+                        return;
                     }
+
+                    if (data.authorized) {
+                        if (data.title) {
+                            document.getElementById('spotify-title').textContent = data.title;
+                            document.getElementById('spotify-artist').textContent = data.artist;
+                            document.getElementById('spotify-cover').src = data.cover || document.querySelector('.spotify-logo').src;
+                            widget.classList.add('visible');
+                        } else {
+                            widget.classList.remove('visible');
+                        }
+                        return;
+                    }
+
+                    widget.classList.remove('visible');
                 })
                 .catch(() => {
                     document.getElementById('spotify-widget').classList.remove('visible');

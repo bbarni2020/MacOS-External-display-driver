@@ -48,8 +48,8 @@ final class VirtualDisplayManager {
         )
 
         self.stream = stream
-        if let error = stream?.start() {
-            NSLog("CGDisplayStream start error: \(error)")
+        if let result = stream?.start(), result != .success {
+            NSLog("CGDisplayStream start error: \(result)")
         }
     }
     
