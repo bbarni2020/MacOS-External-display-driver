@@ -57,6 +57,8 @@ class VideoReceiver:
         self.app = None
         self.web_thread = None
         self.startup_flag = {'play': False}
+        self.display_connected = False
+        self.display_check_thread = None
     
     def get_cpu_temp(self):
         try:
@@ -65,6 +67,44 @@ class VideoReceiver:
             return round(temp, 1)
         except:
             return 0
+    
+    def check_display_connected(self):
+        try:
+            result = subprocess.run(
+                ['xrandr', '--query'],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if ' connected' in line and 'disconnected' not in line:
+                        return True
+            return False
+        except Exception as e:
+            logger.debug(f"Display check failed: {e}")
+            return False
+    
+    def display_monitor_loop(self):
+        while self.running:
+            try:
+                connected = self.check_display_connected()
+                if connected != self.display_connected:
+                    self.display_connected = connected
+                    logger.info(f"Display status changed: {'connected' if connected else 'disconnected'}")
+                else:
+                    self.display_connected = connected
+            except Exception as e:
+                logger.warning(f"Display monitor error: {e}")
+            time.sleep(60)
+    
+    def start_display_monitor(self):
+        if not self.display_check_thread or not self.display_check_thread.is_alive():
+            self.display_connected = self.check_display_connected()
+            logger.info(f"Initial display status: {'connected' if self.display_connected else 'disconnected'}")
+            self.display_check_thread = threading.Thread(target=self.display_monitor_loop, daemon=True)
+            self.display_check_thread.start()
     
     def start_web_server(self):
         if not Flask or not psutil:
@@ -93,6 +133,10 @@ class VideoReceiver:
             storage = psutil.disk_usage('/').percent
             temp = self.get_cpu_temp()
             return {'cpu': round(cpu), 'ram': round(ram), 'storage': round(storage), 'temp': temp}
+        
+        @self.app.route('/display-status')
+        def display_status():
+            return {'connected': self.display_connected}
 
         @self.app.route('/weather')
         def weather():
@@ -194,6 +238,7 @@ class VideoReceiver:
         
         self.web_thread = threading.Thread(target=run_server, daemon=True)
         self.web_thread.start()
+        self.start_display_monitor()
         patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*']
         for pattern in patterns:
             devices = glob.glob(pattern)
