@@ -211,6 +211,29 @@
             margin-left: auto;
             opacity: 0.5;
         }
+        @keyframes swipeOut {
+            0% { transform: translateX(0); opacity: 1; }
+            100% { transform: translateX(-30px); opacity: 0; }
+        }
+        @keyframes swipeIn {
+            0% { transform: translateX(30px); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+        .spotify-info.swipe-out .spotify-title,
+        .spotify-info.swipe-out .spotify-artist {
+            animation: swipeOut 0.3s ease-out forwards;
+        }
+        .spotify-info.swipe-in .spotify-title,
+        .spotify-info.swipe-in .spotify-artist {
+            animation: swipeIn 0.4s ease-out forwards;
+        }
+        .spotify-cover.swipe {
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+        }
+        .spotify-cover.swipe-pulse {
+            transform: scale(1.08);
+            opacity: 0.95;
+        }
         @keyframes fadeInUp {
             0% {
                 opacity: 0;
@@ -301,8 +324,8 @@
             <span id="weather-temp"></span>
         </div>
         <div class="spotify-widget" id="spotify-widget">
-            <img class="spotify-cover" id="spotify-cover" src="" alt=""/>
-            <div class="spotify-info">
+            <img class="spotify-cover swipe" id="spotify-cover" src="" alt=""/>
+            <div class="spotify-info" id="spotify-info">
                 <div class="spotify-title" id="spotify-title"></div>
                 <div class="spotify-artist" id="spotify-artist"></div>
             </div>
@@ -369,12 +392,22 @@
                             span.style.animation = '';
                             span.style.visibility = 'hidden';
                         });
+                        try { localStorage.setItem('deskextend_lastStartupAt', String(Date.now())); } catch (e) {}
+                        if (typeof STARTUP_POLL_LONG !== 'undefined') startupPollDelay = STARTUP_POLL_LONG;
                     }, overlayTransition);
                 }, maxDelay + fadeOutDuration + 50);
             }, 3200);
         }
 
         // Listen for /start-status endpoint
+        const STARTUP_POLL_SHORT = 1500;
+        const STARTUP_POLL_LONG = 3600000;
+        let startupPollDelay = STARTUP_POLL_SHORT;
+        try {
+            const last = Number(localStorage.getItem('deskextend_lastStartupAt') || 0);
+            if (Date.now() - last < STARTUP_POLL_LONG) startupPollDelay = STARTUP_POLL_LONG;
+        } catch (e) {}
+
         async function pollStartStatus() {
             try {
                 const resp = await fetch('/start-status');
@@ -383,7 +416,7 @@
                     if (data.play) playStartupAnimation();
                 }
             } catch (e) {}
-            setTimeout(pollStartStatus, 1500);
+            setTimeout(pollStartStatus, startupPollDelay);
         }
         pollStartStatus();
         function updateTime() {
@@ -436,41 +469,69 @@
                     document.getElementById('weather-temp').textContent = '';
                 });
         }
+        let lastSpotifyTrack = null;
         function updateSpotify() {
             fetch('/spotify')
                 .then(r => r.json())
                 .then(data => {
                     const widget = document.getElementById('spotify-widget');
+                    const infoEl = document.getElementById('spotify-info');
+                    const coverEl = document.getElementById('spotify-cover');
+                    const titleEl = document.getElementById('spotify-title');
+                    const artistEl = document.getElementById('spotify-artist');
                     widget.onclick = null;
                     widget.style.cursor = 'default';
                     if (!data) { widget.classList.remove('visible'); return; }
 
                     if (data.authorized === false && data.authorize_url) {
-                        document.getElementById('spotify-title').textContent = 'Log in to Spotify';
-                        document.getElementById('spotify-artist').textContent = 'Tap to authorize';
-                        document.getElementById('spotify-cover').src = document.querySelector('.spotify-logo').src;
+                        titleEl.textContent = 'Log in to Spotify';
+                        artistEl.textContent = 'Tap to authorize';
+                        coverEl.src = document.querySelector('.spotify-logo').src;
                         widget.classList.add('visible');
                         widget.style.cursor = 'pointer';
                         widget.onclick = function() { window.open(data.authorize_url, '_blank'); };
+                        lastSpotifyTrack = null;
                         return;
                     }
 
                     if (data.authorized) {
                         if (data.title) {
-                            document.getElementById('spotify-title').textContent = data.title;
-                            document.getElementById('spotify-artist').textContent = data.artist;
-                            document.getElementById('spotify-cover').src = data.cover || document.querySelector('.spotify-logo').src;
+                            const currentTrack = data.title + '::' + data.artist;
+                            const trackChanged = lastSpotifyTrack && lastSpotifyTrack !== currentTrack && data.title !== '';
+                            
+                            if (trackChanged) {
+                                infoEl.classList.remove('swipe-in');
+                                infoEl.classList.add('swipe-out');
+                                coverEl.classList.add('swipe', 'swipe-pulse');
+                                setTimeout(() => {
+                                    titleEl.textContent = data.title;
+                                    artistEl.textContent = data.artist;
+                                    coverEl.src = data.cover || document.querySelector('.spotify-logo').src;
+                                    infoEl.classList.remove('swipe-out');
+                                    infoEl.classList.add('swipe-in');
+                                    coverEl.classList.remove('swipe-pulse');
+                                }, 280);
+                            } else {
+                                titleEl.textContent = data.title;
+                                artistEl.textContent = data.artist;
+                                coverEl.src = data.cover || document.querySelector('.spotify-logo').src;
+                            }
+                            
+                            lastSpotifyTrack = currentTrack;
                             widget.classList.add('visible');
                         } else {
                             widget.classList.remove('visible');
+                            lastSpotifyTrack = null;
                         }
                         return;
                     }
 
                     widget.classList.remove('visible');
+                    lastSpotifyTrack = null;
                 })
                 .catch(() => {
                     document.getElementById('spotify-widget').classList.remove('visible');
+                    lastSpotifyTrack = null;
                 });
         }
         updateTime();
