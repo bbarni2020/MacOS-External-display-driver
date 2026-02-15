@@ -39,11 +39,12 @@ def get_waiting_html_path():
     return os.path.join(script_dir, 'waiting.html')
 
 class VideoReceiver:
-    def __init__(self, host='0.0.0.0', port=5900, mode='network', usb_device=None):
+    def __init__(self, host='0.0.0.0', port=5900, mode='network', usb_device=None, device_name=None):
         self.host = host
         self.port = port
         self.mode = mode
         self.usb_device = usb_device or self.detect_usb_device()
+        self.device_name = device_name or os.environ.get('DESKEXTEND_NAME', 'RaspberryPi')
         self.sock = None
         self.serial_conn = None
         self.decoder_process = None
@@ -128,6 +129,8 @@ class VideoReceiver:
         
         @self.app.route('/stats')
         def stats():
+            if not self.display_connected:
+                return {'cpu': 0, 'ram': 0, 'storage': 0, 'temp': 0}
             cpu = psutil.cpu_percent(interval=1)
             ram = psutil.virtual_memory().percent
             storage = psutil.disk_usage('/').percent
@@ -140,6 +143,8 @@ class VideoReceiver:
 
         @self.app.route('/weather')
         def weather():
+            if not self.display_connected:
+                return {'temp': '', 'desc': '', 'icon': ''}
             import requests
             try:
                 resp = requests.get('https://wttr.in/?format=j1', timeout=3)
@@ -154,6 +159,8 @@ class VideoReceiver:
 
         @self.app.route('/spotify')
         def spotify():
+            if not self.display_connected:
+                return {'authorized': False, 'authorize_url': None}
             try:
                 import spotipy
                 from spotipy.oauth2 import SpotifyOAuth
@@ -749,6 +756,10 @@ class VideoReceiver:
         
         while self.running:
             try:
+                if not self.display_connected:
+                    time.sleep(1)
+                    continue
+                    
                 if self.usb_device:
                     opened = self.open_usb()
                     if not opened:
@@ -822,6 +833,10 @@ class VideoReceiver:
         
         while self.running:
             try:
+                if not self.display_connected:
+                    time.sleep(1)
+                    continue
+                    
                 if self.usb_device and not usb_active:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if not self.open_usb():
@@ -942,6 +957,10 @@ class VideoReceiver:
         
         while self.running:
             try:
+                if not self.display_connected:
+                    time.sleep(1)
+                    continue
+                    
                 conn, addr = self.sock.accept()
                 logger.info(f"Connected from {addr}")
 
@@ -1016,6 +1035,7 @@ if __name__ == '__main__':
     parser.add_argument('--host', default='0.0.0.0', help='Network bind address (network/hybrid mode)')
     parser.add_argument('--port', type=int, default=5900, help='Network port (network/hybrid mode)')
     parser.add_argument('--usb-device', help='USB serial device path (auto-detected if not specified)')
+    parser.add_argument('--name', help='Device name for identification (default: RaspberryPi)')
     
     args = parser.parse_args()
     
@@ -1035,12 +1055,14 @@ if __name__ == '__main__':
     else:
         usb_device = args.usb_device
     
-    receiver = VideoReceiver(mode=args.mode, host=args.host, port=args.port, usb_device=usb_device)
+    device_name = args.name or os.environ.get('DESKEXTEND_NAME', 'RaspberryPi')
+    
+    receiver = VideoReceiver(mode=args.mode, host=args.host, port=args.port, usb_device=usb_device, device_name=device_name)
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    logger.info(f"Video receiver starting in {args.mode} mode")
+    logger.info(f"Video receiver '{device_name}' starting in {args.mode} mode")
     if args.mode in ['network', 'hybrid']:
         logger.info(f"  Network: {args.host}:{args.port}")
     if args.mode in ['usb', 'hybrid']:
