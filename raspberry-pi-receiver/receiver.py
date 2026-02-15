@@ -43,6 +43,28 @@ def setup_usb_gadget():
         print("USB gadget setup requires root privileges. Run with: sudo python3 receiver.py --setup-usb")
         sys.exit(1)
     
+    configfs_mount = "/sys/kernel/config"
+    
+    if not os.path.exists(configfs_mount):
+        print("ConfigFS not available. Attempting to mount...")
+        try:
+            subprocess.run(["modprobe", "configfs"], check=False)
+            subprocess.run(["mount", "-t", "configfs", "none", configfs_mount], check=False)
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    if not os.path.exists(configfs_mount):
+        print("Error: ConfigFS not available and cannot be mounted.")
+        print("Your kernel may not have USB gadget support enabled.")
+        print("This requires: CONFIG_USB_GADGET=y and CONFIG_CONFIGFS_FS=y in kernel config")
+        sys.exit(1)
+    
+    try:
+        subprocess.run(["modprobe", "libcomposite"], check=False)
+        subprocess.run(["modprobe", "usb_f_acm"], check=False)
+    except Exception:
+        pass
+    
     gadget_dir = "/sys/kernel/config/usb_gadget/deskextend"
     
     if os.path.isdir(gadget_dir):
@@ -50,6 +72,7 @@ def setup_usb_gadget():
         try:
             with open(os.path.join(gadget_dir, "UDC"), "w") as f:
                 f.write("")
+            time.sleep(0.5)
             subprocess.run(["rmdir", os.path.join(gadget_dir, "configs/c.1/acm.usb0")], check=False)
             subprocess.run(["rmdir", os.path.join(gadget_dir, "configs/c.1/strings/0x409")], check=False)
             subprocess.run(["rmdir", os.path.join(gadget_dir, "configs/c.1")], check=False)
@@ -94,15 +117,15 @@ def setup_usb_gadget():
             f.write("ACM\n")
         
         try:
-            with open("/sys/class/udc/", "r") as f:
-                devices = os.listdir("/sys/class/udc")
-                if not devices:
-                    print("Error: No USB device controller found.")
-                    print("This Pi may not support USB gadget mode.")
-                    sys.exit(1)
-                udc_device = devices[0]
+            devices = os.listdir("/sys/class/udc")
+            if not devices:
+                print("Error: No USB device controller found.")
+                print("Supported: Raspberry Pi Zero, Pi 4, Pi 5 (with OTG/USB-C)")
+                print("Check: ls /sys/class/udc")
+                sys.exit(1)
+            udc_device = devices[0]
         except Exception:
-            print("Error: No USB device controller found.")
+            print("Error: Cannot find USB device controller.")
             sys.exit(1)
         
         with open(os.path.join(gadget_dir, "UDC"), "w") as f:
@@ -122,6 +145,10 @@ def setup_usb_gadget():
         print("\nUSB gadget setup complete!")
         print("You can now run: python3 receiver.py --mode usb")
         
+    except PermissionError as e:
+        print(f"Permission error: {e}")
+        print("Make sure you're running with: sudo python3 receiver.py --setup-usb")
+        sys.exit(1)
     except Exception as e:
         print(f"Error setting up USB gadget: {e}")
         import traceback
@@ -131,14 +158,17 @@ def setup_usb_gadget():
 def install_dependencies():
     print("Installing DeskExtend receiver dependencies...")
     
-    deps = [
+    critical_deps = [
         "python3-pip",
         "gstreamer1.0-tools",
         "gstreamer1.0-plugins-base",
         "gstreamer1.0-plugins-good",
         "gstreamer1.0-plugins-bad",
         "gstreamer1.0-libav",
-        "libgstreamer1.0-dev",
+        "libgstreamer1.0-dev"
+    ]
+    
+    optional_deps = [
         "xrandr",
         "wmctrl",
         "firefox"
@@ -146,20 +176,33 @@ def install_dependencies():
     
     try:
         subprocess.run(["sudo", "apt", "update"], check=True)
-        subprocess.run(["sudo", "apt", "install", "-y"] + deps, check=True)
+    except subprocess.CalledProcessError:
+        print("Warning: Failed to update package lists")
+    
+    print("\nInstalling critical packages...")
+    try:
+        subprocess.run(["sudo", "apt", "install", "-y"] + critical_deps, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Failed to install system packages: {e}")
-        sys.exit(1)
+        print(f"Warning: Some packages failed to install: {e}")
+    
+    print("\nInstalling optional packages (may fail, continuing anyway)...")
+    for pkg in optional_deps:
+        try:
+            subprocess.run(["sudo", "apt", "install", "-y", pkg], check=True, 
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"  ✓ {pkg}")
+        except subprocess.CalledProcessError:
+            print(f"  ✗ {pkg} (not available)")
     
     pip_deps = ["flask", "python-dotenv", "psutil", "spotipy", "requests", "pyserial"]
     
+    print("\nInstalling Python packages...")
     try:
         subprocess.run(["pip3", "install"] + pip_deps, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Failed to install Python packages: {e}")
-        sys.exit(1)
+        print(f"Warning: Some Python packages failed to install: {e}")
     
-    print("Installation complete!")
+    print("\n✓ Installation complete!")
 
 class VideoReceiver:
     def __init__(self, host='0.0.0.0', port=5900, mode='network', usb_device=None, device_name=None):
