@@ -466,6 +466,8 @@ class VideoReceiver:
         except Exception as e:
             logger.error(f"Failed to start web server: {e}")
 
+        kiosk_url = os.environ.get('KIOSK_URL', 'http://127.0.0.1:8080/')
+
         # Start unclutter to hide mouse cursor
         if not self.unclutter_process or self.unclutter_process.poll() is not None:
             try:
@@ -488,12 +490,23 @@ class VideoReceiver:
                 env['DISPLAY'] = ':0'
             
             self.chromium_process = subprocess.Popen(
-                ['chromium', 'http://127.0.0.1:8080/', '--kiosk', '--fullscreen'],
+                [
+                    'chromium',
+                    f'--app={kiosk_url}',
+                    '--kiosk',
+                    '--noerrdialogs',
+                    '--disable-infobars',
+                    '--no-first-run',
+                    '--disable-session-crashed-bubble',
+                    '--disable-translate',
+                    '--disable-features=TranslateUI',
+                    '--start-fullscreen'
+                ],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            logger.info("chromium kiosk mode started with display")
+            logger.info("Chromium kiosk mode started with display")
             return True
         except Exception as e:
             logger.warning(f"Failed to start chromium: {e}")
@@ -519,7 +532,7 @@ class VideoReceiver:
                         proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1, stderr=subprocess.DEVNULL)
                         out = proc.stdout if proc.returncode == 0 else ''
                         for line in out.splitlines():
-                            if 'chromium' in line or 'chromium' in line:
+                            if 'Chromium' in line or 'chromium' in line:
                                 parts = line.split()
                                 if parts:
                                     win_id = parts[0]
