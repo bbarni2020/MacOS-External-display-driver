@@ -534,16 +534,58 @@
                     lastSpotifyTrack = null;
                 });
         }
+        let displayConnected = true;
+        function checkDisplayStatus() {
+            fetch('/display-status')
+                .then(r => r.json())
+                .then(data => {
+                    displayConnected = data.connected;
+                    if (!displayConnected) {
+                        document.querySelector('.main').style.display = 'none';
+                        document.querySelector('.stats').style.display = 'none';
+                        document.querySelector('.spotify-widget').style.display = 'none';
+                        document.querySelector('.internet-status').style.display = 'none';
+                        document.body.style.background = '#000';
+                    } else {
+                        document.querySelector('.main').style.display = 'flex';
+                        document.querySelector('.stats').style.display = 'flex';
+                        document.querySelector('.spotify-widget').style.display = 'flex';
+                    }
+                })
+                .catch(() => {});
+        }
+        function updateStatsConditional() {
+            if (displayConnected) {
+                updateStats();
+            }
+        }
+        function updateWeatherConditional() {
+            if (displayConnected) {
+                updateWeather();
+            }
+        }
+        function updateSpotifyConditional() {
+            if (displayConnected) {
+                updateSpotify();
+            }
+        }
+        function checkInternetConditional() {
+            if (displayConnected) {
+                checkInternet();
+            }
+        }
         updateTime();
+        checkDisplayStatus();
         updateStats();
         checkInternet();
         updateWeather();
         updateSpotify();
         setInterval(updateTime, 1000);
-        setInterval(updateStats, 5000);
-        setInterval(checkInternet, 10000);
-        setInterval(updateWeather, 1800000);
-        setInterval(updateSpotify, 5000);
+        setInterval(checkDisplayStatus, 5000);
+        setInterval(updateStatsConditional, 5000);
+        setInterval(checkInternetConditional, 10000);
+        setInterval(updateWeatherConditional, 1800000);
+        setInterval(updateSpotifyConditional, 5000);
     </script>
 </body>
 </html>

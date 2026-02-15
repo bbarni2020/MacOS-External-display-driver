@@ -262,8 +262,9 @@ class VideoReceiver:
         unique = sorted(set(devices))
         return unique
 
-    def detect_usb_device(self):
-        devices = self.detect_all_devices()
+    @staticmethod
+    def detect_usb_device():
+        devices = VideoReceiver.detect_all_devices()
         return devices[0] if devices else None
     
     def start_firefox_kiosk(self):
@@ -623,7 +624,7 @@ class VideoReceiver:
             self.sock.bind((self.host, self.port))
             self.sock.listen(1)
             self.sock.settimeout(5.0)
-            logger.info(f"Listening on {self.host}:{self.port}")
+            logger.info(f"[{self.device_name}] Listening on {self.host}:{self.port}")
             return True
         except Exception as e:
             logger.error(f"Socket bind failed: {e}")
@@ -793,7 +794,7 @@ class VideoReceiver:
                     time.sleep(3)
                     continue
                 
-                logger.info("USB connection established")
+                logger.info(f"[{self.device_name}] USB connection established")
                 self.frame_count = 0
                 self.bytes_received = 0
                 self.last_fps_time = time.time()
@@ -880,16 +881,16 @@ class VideoReceiver:
                             time.sleep(1)
                             continue
                 
-                logger.info(f"Listening on network {self.host}:{self.port}")
+                logger.info(f"[{self.device_name}] Listening on network {self.host}:{self.port}")
                 if not self.bind_socket():
                     time.sleep(3)
                 
-                logger.info("Waiting for network connection...")
+                logger.info(f"[{self.device_name}] Waiting for network connection...")
                 self.sock.settimeout(2.0)
                 
                 try:
                     conn, addr = self.sock.accept()
-                    logger.info(f"Connected from {addr}")
+                    logger.info(f"[{self.device_name}] Connected from {addr}")
                     
                     self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                     
@@ -962,7 +963,7 @@ class VideoReceiver:
                     continue
                     
                 conn, addr = self.sock.accept()
-                logger.info(f"Connected from {addr}")
+                logger.info(f"[{self.device_name}] Connected from {addr}")
 
                 self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
                 

@@ -25,6 +25,12 @@ class MenuBarController: NSObject {
             dashboardController?.onConnectRequested = onConnectRequested
         }
     }
+    
+    var onDisconnectRequested: (() -> Void)? {
+        didSet {
+            dashboardController?.onDisconnectRequested = onDisconnectRequested
+        }
+    }
 
     func appendLog(_ text: String) {
         DispatchQueue.main.async { [weak self] in
@@ -43,6 +49,7 @@ class MenuBarController: NSObject {
         
         dashboardController = DashboardViewController()
         dashboardController?.onConnectRequested = onConnectRequested
+        dashboardController?.onDisconnectRequested = onDisconnectRequested
         
         popover = NSPopover()
         popover?.contentViewController = dashboardController
@@ -71,8 +78,8 @@ class MenuBarController: NSObject {
         if let popover = popover {
             if popover.isShown {
                 popover.performClose(nil)
-            } else {
-                popover.contentSize = NSSize(width: 380, height: 450)
+            } else {56
+                popover.contentSize = NSSize(width: 380, height: 620)
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
         }

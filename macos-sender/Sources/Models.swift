@@ -16,5 +16,6 @@ struct ConnectionStats {
     var fps = 30
     var bitrate = 8.0
     var encodedFrames = 0
+    var droppedFrames = 0
     var uptime = 0.0
 }

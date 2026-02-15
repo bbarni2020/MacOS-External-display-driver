@@ -6,6 +6,7 @@ REPO="bbarni2020/MacOS-External-display-driver"
 BRANCH="main"
 FOLDER="raspberry-pi-receiver"
 DEST="${PWD}"
+DISPLAY_NAME="Office Display"
 
 # Parse arguments
 for arg in "$@"; do
@@ -35,8 +36,7 @@ if [ ! -d "$SRC" ]; then
 fi
 
 cp -a "$SRC/." "$DEST/"
-chmod +x "$DEST/receiver.py" 2>/dev/null || true
-chmod +x "$DEST/run.sh" 2>/dev/null || true
+chmod +x "$DEST/receiver.py" "$DEST/run.sh" 2>/dev/null || true
 
 if [ -f "$DEST/requirements.txt" ]; then
   if [ -d "$DEST/venv" ]; then
@@ -44,21 +44,13 @@ if [ -f "$DEST/requirements.txt" ]; then
     "$DEST/venv/bin/python" -m pip install --upgrade pip setuptools wheel
     "$DEST/venv/bin/pip" install -r "$DEST/requirements.txt"
   else
-    echo "Virtualenv not found, installing requirements globally or creating venv..."
-    if command -v python3 >/dev/null 2>&1; then
-      python3 -m venv "$DEST/venv"
-      "$DEST/venv/bin/python" -m pip install --upgrade pip setuptools wheel
-      "$DEST/venv/bin/pip" install -r "$DEST/requirements.txt"
-    else
-      if command -v pip3 >/dev/null 2>&1; then
-        pip3 install -r "$DEST/requirements.txt"
-      else
-        echo "Python not available, please install requirements manually"
-      fi
-    fi
+    echo "Setting up virtualenv..."
+    python3 -m venv "$DEST/venv"
+    "$DEST/venv/bin/python" -m pip install --upgrade pip setuptools wheel
+    "$DEST/venv/bin/pip" install -r "$DEST/requirements.txt"
   fi
 fi
 
 echo "Update complete. Starting DeskExtend Receiver..."
-exec sudo chmod +x "$DEST/receiver.py" 2>/dev/null || true
-exec "$DEST/receiver.py"
+. "$DEST/venv/bin/activate"
+"$DEST/venv/bin/python" "$DEST/receiver.py" --mode hybrid --name "$DISPLAY_NAME"

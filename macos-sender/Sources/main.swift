@@ -57,3 +57,4 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         connectionManager?.disconnect()
     }
 }
+
