@@ -142,11 +142,10 @@ enum USBDeviceDetector {
             
             func searchDevices(_ items: [[String: Any]]) -> String? {
                 for item in items {
-                    if let manufacturer = item["manufacturer"] as? String,
-                       manufacturer == "DeskExtend",
-                       let serialNum = item["serial_num"] as? String {
-                        if serialNum.hasPrefix("DeskExtend-") {
-                            let name = String(serialNum.dropFirst("DeskExtend-".count))
+                    if let serialNum = item["serial_num"] as? String,
+                       serialNum.contains("DeskExtend") {
+                        if let nameStart = serialNum.range(of: "DeskExtend-") {
+                            let name = String(serialNum[nameStart.upperBound...])
                             return name.isEmpty ? "RaspberryPi" : name
                         }
                         return "RaspberryPi"
