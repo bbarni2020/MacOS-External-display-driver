@@ -489,58 +489,75 @@ class VideoReceiver:
                 self.kiosk_last_failed = time.time()
                 return False
 
-        # Start unclutter to hide mouse cursor
+        if not self.display_connected:
+            logger.info("Display not connected — waiting up to 8s for display before launching Chromium")
+            for _ in range(16):
+                if self.display_connected:
+                    break
+                time.sleep(0.5)
+
+        env = os.environ.copy()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        if os.geteuid() == 0:
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user:
+                xauth = f"/home/{sudo_user}/.Xauthority"
+                if os.path.exists(xauth):
+                    env['XAUTHORITY'] = xauth
+
+        chromium_args = [
+            chromium_bin,
+            f'--app={kiosk_url}',
+            '--kiosk',
+            '--noerrdialogs',
+            '--disable-infobars',
+            '--no-first-run',
+            '--disable-session-crashed-bubble',
+            '--disable-translate',
+            '--disable-features=TranslateUI',
+            '--start-fullscreen',
+            '--window-position=0,0'
+        ]
+        if os.geteuid() == 0:
+            chromium_args.append('--no-sandbox')
+
         if not self.unclutter_process or self.unclutter_process.poll() is not None:
             try:
-                env = os.environ.copy()
-                if 'DISPLAY' not in env:
-                    env['DISPLAY'] = ':0'
-                self.unclutter_process = subprocess.Popen(
-                    ['unclutter', '-idle', '0', '-root'],
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                logger.info("Unclutter started (cursor hidden)")
-            except Exception as e:
-                logger.warning(f"Failed to start unclutter: {e}")
+                try:
+                    self.unclutter_process = subprocess.Popen(
+                        ['unclutter', '-idle', '0', '-root'],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    self.unclutter_process = None
+            except Exception:
+                self.unclutter_process = None
 
         try:
-            env = os.environ.copy()
-            if 'DISPLAY' not in env:
-                env['DISPLAY'] = ':0'
-            if os.geteuid() == 0:
-                sudo_user = os.environ.get('SUDO_USER')
-                if sudo_user:
-                    xauth = f"/home/{sudo_user}/.Xauthority"
-                    if os.path.exists(xauth):
-                        env['XAUTHORITY'] = xauth
-            
-            chromium_args = [
-                chromium_bin,
-                f'--app={kiosk_url}',
-                '--kiosk',
-                '--noerrdialogs',
-                '--disable-infobars',
-                '--no-first-run',
-                '--disable-session-crashed-bubble',
-                '--disable-translate',
-                '--disable-features=TranslateUI',
-                '--start-fullscreen'
-            ]
-            if os.geteuid() == 0:
-                chromium_args.append('--no-sandbox')
-
             self.chromium_process = subprocess.Popen(
-                [
-                    *chromium_args
-                ],
+                [*chromium_args],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            logger.info("Chromium kiosk mode started with display")
+            logger.info("Chromium kiosk mode started with display (pid=%s)", getattr(self.chromium_process, 'pid', None))
+
+            time.sleep(1.0)
+            try:
+                if self.has_wmctrl():
+                    if not self.bring_chromium_window(timeout=5.0):
+                        logger.info("Chromium started but window not found via wmctrl")
+            except Exception:
+                pass
+
             return True
+        except Exception as e:
+            logger.warning(f"Failed to start chromium: {e}")
+            self.kiosk_last_failed = time.time()
+            return False
         except Exception as e:
             logger.warning(f"Failed to start chromium: {e}")
             self.kiosk_last_failed = time.time()
@@ -553,6 +570,33 @@ class VideoReceiver:
             return result.returncode == 0
         except Exception:
             return False
+
+    def bring_chromium_window(self, timeout=5.0):
+        if not self.has_wmctrl():
+            return False
+        end = time.time() + timeout
+        candidates = ['Chromium', 'chromium', 'DeskExtend', '127.0.0.1', 'Dashboard']
+        while time.time() < end:
+            try:
+                proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
+                out = proc.stdout if proc.returncode == 0 else ''
+                for line in out.splitlines():
+                    for pat in candidates:
+                        if pat in line:
+                            parts = line.split()
+                            if not parts:
+                                continue
+                            win_id = parts[0]
+                            try:
+                                subprocess.run(['wmctrl', '-i', '-R', win_id], timeout=1)
+                                subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'add,fullscreen'], timeout=1)
+                                return True
+                            except Exception:
+                                continue
+            except Exception:
+                pass
+            time.sleep(0.2)
+        return False
 
     def show_chromium_kiosk(self):
         if not self.start_chromium_kiosk():
@@ -609,7 +653,6 @@ class VideoReceiver:
                 pass
             self.chromium_process = None
         
-        # Stop unclutter
         if self.unclutter_process:
             try:
                 self.unclutter_process.terminate()
