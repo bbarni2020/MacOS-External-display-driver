@@ -4,12 +4,12 @@ import CoreGraphics
 final class VirtualDisplayManager {
     private var display: CGVirtualDisplay?
     private var stream: CGDisplayStream?
+    private var isActive = false
 
     init() {
-        updateDisplay(name: "YODOIT Screen", width: 1920, height: 1080)
     }
 
-    func updateDisplay(name: String, width: Int, height: Int) {
+    func createDisplay(name: String, width: Int, height: Int) {
         stream?.stop()
         stream = nil
         display = nil
@@ -51,11 +51,18 @@ final class VirtualDisplayManager {
         if let result = stream?.start(), result != .success {
             NSLog("CGDisplayStream start error: \(result)")
         }
+        isActive = true
+    }
+
+    func updateDisplay(name: String, width: Int, height: Int) {
+        guard isActive else { return }
+        createDisplay(name: name, width: width, height: height)
     }
     
     func stop() {
         stream?.stop()
         stream = nil
         display = nil
+        isActive = false
     }
 }

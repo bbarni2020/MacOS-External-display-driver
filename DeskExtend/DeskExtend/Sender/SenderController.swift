@@ -7,7 +7,9 @@ class SenderController {
     private var videoEncoder: VideoEncoder?
     private weak var appManager: AppManager?
     private var statsTimer: Timer?
-    
+    private var pendingRequest: ConnectionRequest?
+    private var captureStarted = false
+
     init(appManager: AppManager) {
         self.appManager = appManager
     }
@@ -18,6 +20,9 @@ class SenderController {
             appManager?.appendLog("macOS 13+ required for ScreenCaptureKit")
             return
         }
+        
+        pendingRequest = request
+        
         let virtualName = ConfigurationManager.shared.virtualDisplayName
         let targetDisplay: DisplayInfo?
         if let vd = DisplayManager.shared.displayNamed(virtualName) {
@@ -32,18 +37,10 @@ class SenderController {
             appManager?.appendLog("Target display not found")
             return
         }
+        
         let transport = HybridTransport(
             statusCallback: { [weak self] connected, address in
-                self?.appManager?.updateConnectionStatus(
-                    connected: connected,
-                    address: address,
-                    bitrate: self?.transport?.currentBitrate ?? 0,
-                    fps: request.config.fps,
-                    resolution: self?.resolutionString(for: request.config) ?? "",
-                    encodedFrames: self?.videoEncoder?.frameCount ?? 0,
-                    droppedFrames: self?.videoEncoder?.droppedFrames ?? 0,
-                    uptime: self?.appManager?.uptime ?? 0
-                )
+                self?.handleConnectionStatusChange(connected: connected, address: address, request: request)
             },
             logCallback: { [weak self] line in
                 self?.appManager?.appendLog(line)
@@ -51,7 +48,6 @@ class SenderController {
         )
         self.transport = transport
         
-        // Connect transport based on mode
         switch request.mode {
         case .usb:
             transport.connectUSB(devicePath: request.usbDevice)
@@ -61,51 +57,76 @@ class SenderController {
             transport.connectHybrid(usbPath: request.usbDevice, networkHost: request.host, port: UInt16(request.port))
         }
         
-        // Create video encoder
         let encoder = VideoEncoder(config: request.config) { [weak self] data in
             self?.transport?.send(data: data)
         }
         self.videoEncoder = encoder
         
-        // Create screen capture engine
         let captureEngine = ScreenCaptureEngine(config: request.config, targetDisplay: targetDisplayUnwrapped, encoder: encoder)
         self.screenCaptureEngine = captureEngine
+    }
+    
+    private func handleConnectionStatusChange(connected: Bool, address: String, request: ConnectionRequest) {
+        appManager?.updateConnectionStatus(
+            connected: connected,
+            address: address,
+            bitrate: transport?.currentBitrate ?? 0,
+            fps: request.config.fps,
+            resolution: resolutionString(for: request.config),
+            encodedFrames: videoEncoder?.frameCount ?? 0,
+            droppedFrames: videoEncoder?.droppedFrames ?? 0,
+            uptime: appManager?.uptime ?? 0
+        )
         
+        if connected && !captureStarted {
+            startCapture()
+        } else if !connected && captureStarted {
+            stopCapture()
+        }
+    }
+    
+    private func startCapture() {
+        guard let captureEngine = screenCaptureEngine else { return }
         do {
             try captureEngine.start()
             appManager?.appendLog("Screen capture started")
+            captureStarted = true
+            startStatsTimer()
         } catch {
             appManager?.appendLog("Failed to start capture: \(error.localizedDescription)")
             stop()
-            return
         }
-        startStatsTimer()
+    }
+    
+    private func stopCapture() {
+        if let capture = screenCaptureEngine {
+            capture.stop()
+            appManager?.appendLog("Screen capture stopped")
+        }
+        captureStarted = false
+        statsTimer?.invalidate()
+        statsTimer = nil
     }
     
     func stop() {
         appManager?.appendLog("Stopping sender controller...")
         
-        // Stop stats timer first
         statsTimer?.invalidate()
         statsTimer = nil
         
-        // Stop screen capture (like receiver stops decoder)
-        if let capture = screenCaptureEngine {
-            capture.stop()
-            appManager?.appendLog("Screen capture stopped")
-        }
-        screenCaptureEngine = nil
+        stopCapture()
         
-        // Stop video encoder
         videoEncoder = nil
         appManager?.appendLog("Video encoder stopped")
         
-        // Stop and close transport connection
         if let transport = transport {
             transport.stop()
             appManager?.appendLog("Transport stopped")
         }
         transport = nil
+        
+        screenCaptureEngine = nil
+        pendingRequest = nil
         
         appManager?.appendLog("Sender controller stopped")
     }

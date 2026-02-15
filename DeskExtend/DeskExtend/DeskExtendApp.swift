@@ -21,7 +21,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         NSApplication.shared.setActivationPolicy(.accessory)
         UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
-        virtualDisplayManager = VirtualDisplayManager()
     }
     
     @objc func windowDidBecomeKey(_ notification: Notification) {
@@ -71,7 +70,6 @@ struct DeskExtendApp: App {
                 .frame(minWidth: 800, maxWidth: 1200, minHeight: 600, maxHeight: .infinity)
                 .onAppear {
                     appDelegate.appManager = appManager
-                    appManager.virtualDisplayManager = appDelegate.virtualDisplayManager
                     appManager.windowIsOpen = true
                     NSApplication.shared.setActivationPolicy(.regular)
                     
@@ -84,9 +82,20 @@ struct DeskExtendApp: App {
                     if senderController == nil {
                         senderController = SenderController(appManager: appManager)
                         appManager.onConnectRequest = { request in
+                            if appDelegate.virtualDisplayManager == nil {
+                                appDelegate.virtualDisplayManager = VirtualDisplayManager()
+                                appManager.virtualDisplayManager = appDelegate.virtualDisplayManager
+                            }
+                            appDelegate.virtualDisplayManager?.createDisplay(
+                                name: ConfigurationManager.shared.virtualDisplayName,
+                                width: ConfigurationManager.shared.virtualDisplaySize.width,
+                                height: ConfigurationManager.shared.virtualDisplaySize.height
+                            )
                             senderController?.connect(request: request)
                         }
-                        appManager.onDisconnect = { [weak senderController] in
+                        appManager.onDisconnect = { [weak senderController, weak appDelegate] in
+                            appDelegate?.virtualDisplayManager?.stop()
+                            appDelegate?.virtualDisplayManager = nil
                             senderController?.stop()
                         }
                     }

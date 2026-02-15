@@ -97,34 +97,32 @@ class USBTransport {
 
 class USBDeviceDetector {
     static func findRaspberryPiDevices() -> [String] {
-        var devices: [String] = []
         let fileManager = FileManager.default
-        
         let devPath = "/dev"
-        if let contents = try? fileManager.contentsOfDirectory(atPath: devPath) {
-            for item in contents {
-                if item.hasPrefix("tty.usbmodem") || item.hasPrefix("cu.usbmodem") {
-                    devices.append("\(devPath)/\(item)")
-                }
-            }
-        }
+        
+        guard let contents = try? fileManager.contentsOfDirectory(atPath: devPath) else { return [] }
+        
+        let devices = contents
+            .filter { $0.hasPrefix("tty.usbmodem") || $0.hasPrefix("cu.usbmodem") }
+            .map { "\(devPath)/\($0)" }
+            .sorted()
         
         return devices
     }
     
     static func findAllUSBDevices() -> [String] {
-        var devices: [String] = []
         let fileManager = FileManager.default
-        
         let devPath = "/dev"
-        if let contents = try? fileManager.contentsOfDirectory(atPath: devPath) {
-            for item in contents {
-                if item.hasPrefix("tty.usb") || item.hasPrefix("cu.usb") || 
-                   item.hasPrefix("tty.usbmodem") || item.hasPrefix("cu.usbmodem") {
-                    devices.append("\(devPath)/\(item)")
-                }
+        
+        guard let contents = try? fileManager.contentsOfDirectory(atPath: devPath) else { return [] }
+        
+        let devices = contents
+            .filter { item in
+                item.hasPrefix("tty.usb") || item.hasPrefix("cu.usb") ||
+                item.hasPrefix("tty.usbmodem") || item.hasPrefix("cu.usbmodem")
             }
-        }
+            .map { "\(devPath)/\($0)" }
+            .sorted()
         
         return devices
     }

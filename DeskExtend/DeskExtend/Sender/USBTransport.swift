@@ -94,7 +94,8 @@ enum USBDeviceDetector {
     }
 
     static func allDevices() -> [String] {
-        listDevices(matching: ["tty.usb", "cu.usb", "tty.usbmodem", "cu.usbmodem"])
+        let devices = listDevices(matching: ["tty.usb", "cu.usb", "tty.usbmodem", "cu.usbmodem"])
+        return devices.sorted()
     }
 
     private static func listDevices(matching prefixes: [String]) -> [String] {

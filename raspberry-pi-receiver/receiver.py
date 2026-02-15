@@ -831,6 +831,7 @@ class VideoReceiver:
         
         network_thread = None
         usb_active = False
+        usb_failed = False
         
         while self.running:
             try:
@@ -838,7 +839,7 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
                     
-                if self.usb_device and not usb_active:
+                if self.usb_device and not usb_active and not usb_failed:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if not self.open_usb():
                         opened = False
@@ -849,6 +850,7 @@ class VideoReceiver:
                                 break
                         if not opened:
                             logger.warning("USB connection failed, falling back to network...")
+                            usb_failed = True
                             self.usb_device = None
                         else:
                             usb_active = True
@@ -1045,19 +1047,30 @@ if __name__ == '__main__':
         if usb_device:
             logger.info(f"Auto-detected USB device: {usb_device}")
         else:
-            logger.warning("USB mode selected but no device detected. Available devices:")
+        if args.mode == 'usb':
             devices = VideoReceiver.detect_all_devices()
-            if devices:
-                for dev in devices:
-                    logger.info(f"  {dev}")
-            if args.mode == 'usb':
-                logger.error("No USB device found for USB mode")
+            if not devices:
+                logger.error("No USB devices found")
                 sys.exit(1)
-    else:
-        usb_device = args.usb_device
-    
-    device_name = args.name or os.environ.get('DESKEXTEND_NAME', 'RaspberryPi')
-    
+            
+            print("\nAvailable USB devices:")
+            for idx, dev in enumerate(devices, 1):
+                print(f"  {idx}. {dev}")
+            
+            while True:
+                try:
+                    selection = input(f"\nSelect device (1-{len(devices)}): ").strip()
+                    idx = int(selection) - 1
+                    if 0 <= idx < len(devices):
+                        usb_device = devices[idx]
+                        logger.info(f"Selected USB device: {usb_device}")
+                        break
+                    else:
+                        print(f"Invalid selection. Please enter a number between 1 and {len(devices)}")
+                except ValueError:
+                    print(f"Invalid input. Please enter a number between 1 and {len(devices)}")
+        else:
+            usb_device = None
     receiver = VideoReceiver(mode=args.mode, host=args.host, port=args.port, usb_device=usb_device, device_name=device_name)
     
     signal.signal(signal.SIGINT, signal_handler)

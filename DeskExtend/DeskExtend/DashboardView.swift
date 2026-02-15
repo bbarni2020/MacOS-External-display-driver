@@ -273,29 +273,87 @@ struct ConnectionTabView: View {
                 if appManager.connectionMode != .network {
                     GlassCard(title: "USB Device", value: usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput) {
                         VStack(spacing: 8) {
-                            if !appManager.usbDevices.isEmpty {
-                                Picker("USB", selection: $appManager.usbDevice) {
-                                    ForEach(appManager.usbDevices, id: \.self) { dev in
-                                        Text(dev).tag(dev)
-                                    }
-                                }
-                                .labelsHidden()
-                                .frame(maxWidth: .infinity)
-                            }
-                            TextField("/dev/cu.usbmodemXXXX", text: $usbDeviceInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11, design: .monospaced))
                             HStack(spacing: 8) {
                                 Button(action: { appManager.refreshUsbDevices() }) {
-                                    Label("Rescan", systemImage: "arrow.clockwise")
+                                    Label("Refresh Devices", systemImage: "arrow.clockwise")
                                 }
                                 .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                
                                 Spacer()
+                                
+                                if !appManager.usbDevices.isEmpty {
+                                    Text("\(appManager.usbDevices.count) available")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            if appManager.usbDevices.isEmpty {
+                                VStack(spacing: 8) {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundColor(.yellow)
+                                            .font(.system(size: 12))
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("No USB devices detected")
+                                                .font(.system(size: 11, weight: .semibold))
+                                            
+                                            Text("Connect USB cable and refresh, or enter device path manually")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 10)
+                                    .background(Color.yellow.opacity(0.1))
+                                    .cornerRadius(6)
+                                }
+                            } else {
+                                VStack(spacing: 6) {
+                                    Text("Available Devices:")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    
+                                    Picker("", selection: $appManager.usbDevice) {
+                                        ForEach(appManager.usbDevices, id: \.self) { dev in
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "cable.connector")
+                                                    .font(.system(size: 10))
+                                                Text(dev)
+                                                    .font(.system(size: 11, design: .monospaced))
+                                            }
+                                            .tag(dev)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .frame(maxWidth: .infinity)
+                                }
+                            }
+                            
+                            Divider()
+                                .padding(.vertical, 2)
+                            
+                            VStack(spacing: 6) {
+                                Text("Manual Entry:")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                
+                                TextField("/dev/cu.usbmodemXXXX", text: $usbDeviceInput)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 11, design: .monospaced))
+                                
                                 Button(action: {
                                     appManager.usbDevice = usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput
                                     usbDeviceInput = appManager.usbDevice
                                 }) {
-                                    Label("Use Manual", systemImage: "pencil")
+                                    Label("Use Manual Device", systemImage: "checkmark.circle.fill")
+                                        .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
