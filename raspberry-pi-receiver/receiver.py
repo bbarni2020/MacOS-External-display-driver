@@ -184,7 +184,8 @@ def install_dependencies():
     optional_deps = [
         "xrandr",
         "wmctrl",
-        "firefox"
+        "firefox",
+        "unclutter"
     ]
     
     try:
@@ -237,6 +238,7 @@ class VideoReceiver:
         self.serial_conn = None
         self.decoder_process = None
         self.firefox_process = None
+        self.unclutter_process = None
         self.running = False
         self.frame_count = 0
         self.last_fps_time = time.time()
@@ -464,13 +466,29 @@ class VideoReceiver:
         except Exception as e:
             logger.error(f"Failed to start web server: {e}")
 
+        # Start unclutter to hide mouse cursor
+        if not self.unclutter_process or self.unclutter_process.poll() is not None:
+            try:
+                env = os.environ.copy()
+                if 'DISPLAY' not in env:
+                    env['DISPLAY'] = ':0'
+                self.unclutter_process = subprocess.Popen(
+                    ['unclutter', '-idle', '0', '-root'],
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                logger.info("Unclutter started (cursor hidden)")
+            except Exception as e:
+                logger.warning(f"Failed to start unclutter: {e}")
+
         try:
             env = os.environ.copy()
             if 'DISPLAY' not in env:
                 env['DISPLAY'] = ':0'
             
             self.firefox_process = subprocess.Popen(
-                ['firefox', '--kiosk', 'http://127.0.0.1:8080/'],
+                ['firefox', '--kiosk', '--fullscreen', 'http://127.0.0.1:8080/'],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
@@ -543,6 +561,18 @@ class VideoReceiver:
             except Exception:
                 pass
             self.firefox_process = None
+        
+        # Stop unclutter
+        if self.unclutter_process:
+            try:
+                self.unclutter_process.terminate()
+                try:
+                    self.unclutter_process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    self.unclutter_process.kill()
+            except Exception:
+                pass
+            self.unclutter_process = None
 
     def schedule_hide_when_window_present(self, window_names, appear_timeout=3.0, after_delay=5.0):
         def watcher():
