@@ -38,6 +38,129 @@ def get_waiting_html_path():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(script_dir, 'waiting.html')
 
+def setup_usb_gadget():
+    if os.geteuid() != 0:
+        print("USB gadget setup requires root privileges. Run with: sudo python3 receiver.py --setup-usb")
+        sys.exit(1)
+    
+    gadget_dir = "/sys/kernel/config/usb_gadget/deskextend"
+    
+    if os.path.isdir(gadget_dir):
+        print("Removing existing gadget...")
+        try:
+            with open(os.path.join(gadget_dir, "UDC"), "w") as f:
+                f.write("")
+            subprocess.run(["rmdir", os.path.join(gadget_dir, "configs/c.1/acm.usb0")], check=False)
+            subprocess.run(["rmdir", os.path.join(gadget_dir, "configs/c.1/strings/0x409")], check=False)
+            subprocess.run(["rmdir", os.path.join(gadget_dir, "configs/c.1")], check=False)
+            subprocess.run(["rmdir", os.path.join(gadget_dir, "functions/acm.usb0")], check=False)
+            subprocess.run(["rmdir", os.path.join(gadget_dir, "strings/0x409")], check=False)
+            subprocess.run(["rmdir", gadget_dir], check=False)
+        except Exception as e:
+            print(f"Warning: {e}")
+    
+    print("Creating USB gadget...")
+    
+    try:
+        os.makedirs(gadget_dir)
+        
+        with open(os.path.join(gadget_dir, "idVendor"), "w") as f:
+            f.write("0x1d6b\n")
+        with open(os.path.join(gadget_dir, "idProduct"), "w") as f:
+            f.write("0x0108\n")
+        
+        os.makedirs(os.path.join(gadget_dir, "strings/0x409"))
+        with open(os.path.join(gadget_dir, "strings/0x409/manufacturer"), "w") as f:
+            f.write("DeskExtend\n")
+        with open(os.path.join(gadget_dir, "strings/0x409/product"), "w") as f:
+            f.write("RaspberryPi\n")
+        with open(os.path.join(gadget_dir, "strings/0x409/serialnumber"), "w") as f:
+            f.write(f"DeskExtend-{int(time.time())}\n")
+        
+        os.makedirs(os.path.join(gadget_dir, "configs/c.1"))
+        with open(os.path.join(gadget_dir, "configs/c.1/MaxPower"), "w") as f:
+            f.write("500\n")
+        
+        os.makedirs(os.path.join(gadget_dir, "functions/acm.usb0"))
+        config_dir = os.path.join(gadget_dir, "configs/c.1")
+        func_dir = os.path.join(gadget_dir, "functions/acm.usb0")
+        
+        symlink_target = os.path.join(config_dir, "acm.usb0")
+        if not os.path.exists(symlink_target):
+            os.symlink(func_dir, symlink_target)
+        
+        os.makedirs(os.path.join(config_dir, "strings/0x409"))
+        with open(os.path.join(config_dir, "strings/0x409/configuration"), "w") as f:
+            f.write("ACM\n")
+        
+        try:
+            with open("/sys/class/udc/", "r") as f:
+                devices = os.listdir("/sys/class/udc")
+                if not devices:
+                    print("Error: No USB device controller found.")
+                    print("This Pi may not support USB gadget mode.")
+                    sys.exit(1)
+                udc_device = devices[0]
+        except Exception:
+            print("Error: No USB device controller found.")
+            sys.exit(1)
+        
+        with open(os.path.join(gadget_dir, "UDC"), "w") as f:
+            f.write(f"{udc_device}\n")
+        
+        print("USB gadget configured successfully!")
+        print(f"Device controller: {udc_device}")
+        
+        time.sleep(1)
+        
+        if os.path.exists("/dev/ttyGS0"):
+            print("Device /dev/ttyGS0 is ready!")
+            subprocess.run(["stty", "-F", "/dev/ttyGS0", "115200"], check=False)
+        else:
+            print("Warning: /dev/ttyGS0 not found yet. It may appear after a moment.")
+        
+        print("\nUSB gadget setup complete!")
+        print("You can now run: python3 receiver.py --mode usb")
+        
+    except Exception as e:
+        print(f"Error setting up USB gadget: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+def install_dependencies():
+    print("Installing DeskExtend receiver dependencies...")
+    
+    deps = [
+        "python3-pip",
+        "gstreamer1.0-tools",
+        "gstreamer1.0-plugins-base",
+        "gstreamer1.0-plugins-good",
+        "gstreamer1.0-plugins-bad",
+        "gstreamer1.0-libav",
+        "libgstreamer1.0-dev",
+        "xrandr",
+        "wmctrl",
+        "firefox"
+    ]
+    
+    try:
+        subprocess.run(["sudo", "apt", "update"], check=True)
+        subprocess.run(["sudo", "apt", "install", "-y"] + deps, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to install system packages: {e}")
+        sys.exit(1)
+    
+    pip_deps = ["flask", "python-dotenv", "psutil", "spotipy", "requests", "pyserial"]
+    
+    try:
+        subprocess.run(["pip3", "install"] + pip_deps, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to install Python packages: {e}")
+        sys.exit(1)
+    
+    print("Installation complete!")
+
 class VideoReceiver:
     def __init__(self, host='0.0.0.0', port=5900, mode='network', usb_device=None, device_name=None):
         self.host = host
@@ -1037,40 +1160,58 @@ if __name__ == '__main__':
                         help='Connection mode: network (TCP), usb (serial), or hybrid (auto-failover)')
     parser.add_argument('--host', default='0.0.0.0', help='Network bind address (network/hybrid mode)')
     parser.add_argument('--port', type=int, default=5900, help='Network port (network/hybrid mode)')
-    parser.add_argument('--usb-device', help='USB serial device path (auto-detected if not specified)')
+    parser.add_argument('--usb-device', help='USB serial device path (use /dev/ttyGS0 for Pi gadget mode)')
     parser.add_argument('--name', help='Device name for identification (default: RaspberryPi)')
+    parser.add_argument('--install', action='store_true', help='Install system and Python dependencies')
+    parser.add_argument('--setup-usb', action='store_true', help='Setup USB gadget mode (requires root)')
     
     args = parser.parse_args()
     
-    if args.mode in ['usb', 'hybrid'] and not args.usb_device:
-        usb_device = VideoReceiver.detect_usb_device()
-        if usb_device:
-            logger.info(f"Auto-detected USB device: {usb_device}")
+    if args.install:
+        install_dependencies()
+        sys.exit(0)
+    
+    if args.setup_usb:
+        setup_usb_gadget()
+        sys.exit(0)
+    
+    usb_device = args.usb_device
+    
+    if args.mode in ['usb', 'hybrid'] and not usb_device:
+        if os.path.exists('/dev/ttyGS0'):
+            usb_device = '/dev/ttyGS0'
+            logger.info("USB gadget mode detected: /dev/ttyGS0")
         else:
-        if args.mode == 'usb':
-            devices = VideoReceiver.detect_all_devices()
-            if not devices:
-                logger.error("No USB devices found")
-                sys.exit(1)
-            
-            print("\nAvailable USB devices:")
-            for idx, dev in enumerate(devices, 1):
-                print(f"  {idx}. {dev}")
-            
-            while True:
-                try:
-                    selection = input(f"\nSelect device (1-{len(devices)}): ").strip()
-                    idx = int(selection) - 1
-                    if 0 <= idx < len(devices):
-                        usb_device = devices[idx]
-                        logger.info(f"Selected USB device: {usb_device}")
-                        break
-                    else:
-                        print(f"Invalid selection. Please enter a number between 1 and {len(devices)}")
-                except ValueError:
-                    print(f"Invalid input. Please enter a number between 1 and {len(devices)}")
-        else:
-            usb_device = None
+            auto_device = VideoReceiver.detect_usb_device()
+            if auto_device:
+                usb_device = auto_device
+                logger.info(f"Auto-detected USB device: {usb_device}")
+            else:
+                if args.mode == 'usb':
+                    devices = VideoReceiver.detect_all_devices()
+                    if not devices:
+                        logger.error("No USB devices found")
+                        sys.exit(1)
+                    
+                    print("\nAvailable USB devices:")
+                    for idx, dev in enumerate(devices, 1):
+                        print(f"  {idx}. {dev}")
+                    
+                    while True:
+                        try:
+                            selection = input(f"\nSelect device (1-{len(devices)}): ").strip()
+                            idx = int(selection) - 1
+                            if 0 <= idx < len(devices):
+                                usb_device = devices[idx]
+                                logger.info(f"Selected USB device: {usb_device}")
+                                break
+                            else:
+                                print(f"Invalid selection. Please enter a number between 1 and {len(devices)}")
+                        except ValueError:
+                            print(f"Invalid input. Please enter a number between 1 and {len(devices)}")
+    
+    device_name = args.name or os.environ.get('DESKEXTEND_NAME', 'RaspberryPi')
+    
     receiver = VideoReceiver(mode=args.mode, host=args.host, port=args.port, usb_device=usb_device, device_name=device_name)
     
     signal.signal(signal.SIGINT, signal_handler)
