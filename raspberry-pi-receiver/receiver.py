@@ -9,6 +9,7 @@ import threading
 import time
 import os
 import logging
+import shutil
 try:
     import serial
 except Exception:
@@ -239,6 +240,7 @@ class VideoReceiver:
         self.decoder_process = None
         self.chromium_process = None
         self.unclutter_process = None
+        self.kiosk_last_failed = 0.0
         self.running = False
         self.frame_count = 0
         self.last_fps_time = time.time()
@@ -461,12 +463,31 @@ class VideoReceiver:
         if self.chromium_process and self.chromium_process.poll() is None:
             return True
 
+        if time.time() - self.kiosk_last_failed < 5.0:
+            return False
+
         try:
             self.start_web_server()
         except Exception as e:
             logger.error(f"Failed to start web server: {e}")
 
         kiosk_url = os.environ.get('KIOSK_URL', 'http://127.0.0.1:8080/')
+
+        chromium_bin = os.environ.get('CHROMIUM_BIN')
+        if chromium_bin:
+            if not shutil.which(chromium_bin):
+                logger.error(f"Chromium binary not found: {chromium_bin}")
+                self.kiosk_last_failed = time.time()
+                return False
+        else:
+            for candidate in ('chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'):
+                if shutil.which(candidate):
+                    chromium_bin = candidate
+                    break
+            if not chromium_bin:
+                logger.error("Chromium not found. Install with: sudo apt install chromium or chromium-browser")
+                self.kiosk_last_failed = time.time()
+                return False
 
         # Start unclutter to hide mouse cursor
         if not self.unclutter_process or self.unclutter_process.poll() is not None:
@@ -491,7 +512,7 @@ class VideoReceiver:
             
             self.chromium_process = subprocess.Popen(
                 [
-                    'chromium',
+                    chromium_bin,
                     f'--app={kiosk_url}',
                     '--kiosk',
                     '--noerrdialogs',
@@ -510,6 +531,7 @@ class VideoReceiver:
             return True
         except Exception as e:
             logger.warning(f"Failed to start chromium: {e}")
+            self.kiosk_last_failed = time.time()
             return False
     
     @staticmethod
@@ -1186,8 +1208,8 @@ class VideoReceiver:
         logger.info("Starting all modes (USB + Network)")
         self.show_chromium_kiosk()
         
-        usb_thread = threading.Thread(target=self.run_usb, daemon=False)
-        network_thread = threading.Thread(target=self.run_network, daemon=False)
+        usb_thread = threading.Thread(target=self.run_usb, daemon=True)
+        network_thread = threading.Thread(target=self.run_network, daemon=True)
         
         usb_thread.start()
         network_thread.start()
