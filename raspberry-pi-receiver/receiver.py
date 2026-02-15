@@ -509,19 +509,31 @@ class VideoReceiver:
             env = os.environ.copy()
             if 'DISPLAY' not in env:
                 env['DISPLAY'] = ':0'
+            if os.geteuid() == 0:
+                sudo_user = os.environ.get('SUDO_USER')
+                if sudo_user:
+                    xauth = f"/home/{sudo_user}/.Xauthority"
+                    if os.path.exists(xauth):
+                        env['XAUTHORITY'] = xauth
             
+            chromium_args = [
+                chromium_bin,
+                f'--app={kiosk_url}',
+                '--kiosk',
+                '--noerrdialogs',
+                '--disable-infobars',
+                '--no-first-run',
+                '--disable-session-crashed-bubble',
+                '--disable-translate',
+                '--disable-features=TranslateUI',
+                '--start-fullscreen'
+            ]
+            if os.geteuid() == 0:
+                chromium_args.append('--no-sandbox')
+
             self.chromium_process = subprocess.Popen(
                 [
-                    chromium_bin,
-                    f'--app={kiosk_url}',
-                    '--kiosk',
-                    '--noerrdialogs',
-                    '--disable-infobars',
-                    '--no-first-run',
-                    '--disable-session-crashed-bubble',
-                    '--disable-translate',
-                    '--disable-features=TranslateUI',
-                    '--start-fullscreen'
+                    *chromium_args
                 ],
                 env=env,
                 stdout=subprocess.DEVNULL,
