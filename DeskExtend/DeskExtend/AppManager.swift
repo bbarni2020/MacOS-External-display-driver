@@ -28,8 +28,11 @@ final class AppManager: ObservableObject {
         didSet { ConfigurationManager.shared.usbDevice = usbDevice }
     }
     @Published var usbDevices: [String] = []
+    @Published var usbDeviceNames: [String] = []
     func refreshUsbDevices() {
-        usbDevices = USBDeviceDetector.allDevices()
+        let devices = USBDeviceDetector.allDevices()
+        usbDevices = devices.map { $0.path }
+        usbDeviceNames = devices.map { $0.name }
         if let first = usbDevices.first, usbDevice.isEmpty {
             usbDevice = first
         }

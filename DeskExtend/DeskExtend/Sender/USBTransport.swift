@@ -89,19 +89,79 @@ final class USBTransport {
 }
 
 enum USBDeviceDetector {
-    static func raspberryPiDevices() -> [String] {
-        listDevices(matching: ["tty.usbmodem", "cu.usbmodem"])
+    static func deskextendDevices() -> [(path: String, name: String)] {
+        let devices = listModemDevices()
+        var result: [(path: String, name: String)] = []
+        
+        for device in devices {
+            if let name = extractDeviceName(device) {
+                result.append((path: device, name: name))
+            }
+        }
+        
+        return result
     }
-
-    static func allDevices() -> [String] {
-        let devices = listDevices(matching: ["tty.usb", "cu.usb", "tty.usbmodem", "cu.usbmodem"])
-        return devices.sorted()
+    
+    static func allDevices() -> [(path: String, name: String)] {
+        let devices = deskextendDevices()
+        if !devices.isEmpty {
+            return devices
+        }
+        
+        return listModemDevices().map { (path: $0, name: "Unknown Device") }
     }
-
-    private static func listDevices(matching prefixes: [String]) -> [String] {
+    
+    private static func listModemDevices() -> [String] {
         let manager = FileManager.default
         let devPath = "/dev"
         guard let contents = try? manager.contentsOfDirectory(atPath: devPath) else { return [] }
-        return contents.filter { item in prefixes.contains { item.hasPrefix($0) } }.map { "\(devPath)/\($0)" }
+        let prefixes = ["cu.usbmodem"]
+        return contents
+            .filter { item in prefixes.contains(where: { item.hasPrefix($0) }) }
+            .map { "\(devPath)/\($0)" }
+            .sorted()
+    }
+    
+    private static func extractDeviceName(_ devicePath: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+        process.arguments = ["SPUSBDataType", "-xml"]
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        
+        do {
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            
+            guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [[String: Any]],
+                  let devices = plist.first?["_items"] as? [[String: Any]] else {
+                return nil
+            }
+            
+            func searchDevices(_ items: [[String: Any]]) -> String? {
+                for item in items {
+                    if let serialNum = item["serial_num"] as? String,
+                       serialNum.contains("DeskExtend") {
+                        if let nameStart = serialNum.range(of: "DeskExtend-") {
+                            let name = String(serialNum[nameStart.upperBound...])
+                            return name.isEmpty ? "RaspberryPi" : name
+                        }
+                        return "RaspberryPi"
+                    }
+                    
+                    if let children = item["_items"] as? [[String: Any]],
+                       let foundName = searchDevices(children) {
+                        return foundName
+                    }
+                }
+                return nil
+            }
+            
+            return searchDevices(devices)
+        } catch {
+            return nil
+        }
     }
 }

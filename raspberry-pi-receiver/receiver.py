@@ -498,7 +498,7 @@ class VideoReceiver:
             try:
                 if self.has_wmctrl():
                     try:
-                        proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
+                        proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1, stderr=subprocess.DEVNULL)
                         out = proc.stdout if proc.returncode == 0 else ''
                         for line in out.splitlines():
                             if 'Firefox' in line or 'firefox' in line:
@@ -506,7 +506,7 @@ class VideoReceiver:
                                 if parts:
                                     win_id = parts[0]
                                     try:
-                                        subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'add,hidden'], timeout=1)
+                                        subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'add,hidden'], timeout=1, stderr=subprocess.DEVNULL)
                                     except Exception:
                                         pass
                     except Exception:
@@ -552,7 +552,7 @@ class VideoReceiver:
                 while time.time() < end_time and not found and self.running:
                     try:
                         if self.has_wmctrl():
-                            proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
+                            proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1, stderr=subprocess.DEVNULL)
                             out = proc.stdout if proc.returncode == 0 else ''
                         else:
                             proc = subprocess.run(['ps', 'aux'], capture_output=True, text=True, timeout=1)
@@ -779,7 +779,7 @@ class VideoReceiver:
                 time.sleep(delay)
                 for name in window_names:
                     try:
-                        subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1)
+                        subprocess.run(['wmctrl', '-r', name, '-b', 'toggle,fullscreen'], timeout=1, stderr=subprocess.DEVNULL)
                     except Exception:
                         continue
             except Exception:

@@ -320,12 +320,18 @@ struct ConnectionTabView: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     
                                     Picker("", selection: $appManager.usbDevice) {
-                                        ForEach(appManager.usbDevices, id: \.self) { dev in
+                                        ForEach(Array(appManager.usbDevices.enumerated()), id: \.offset) { index, dev in
+                                            let name = index < appManager.usbDeviceNames.count ? appManager.usbDeviceNames[index] : "Unknown"
                                             HStack(spacing: 8) {
                                                 Image(systemName: "cable.connector")
                                                     .font(.system(size: 10))
-                                                Text(dev)
-                                                    .font(.system(size: 11, design: .monospaced))
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(name)
+                                                        .font(.system(size: 11, weight: .medium))
+                                                    Text(dev)
+                                                        .font(.system(size: 9, design: .monospaced))
+                                                        .opacity(0.6)
+                                                }
                                             }
                                             .tag(dev)
                                         }

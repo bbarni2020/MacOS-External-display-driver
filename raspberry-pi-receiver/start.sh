@@ -6,7 +6,7 @@ REPO="bbarni2020/MacOS-External-display-driver"
 BRANCH="main"
 FOLDER="raspberry-pi-receiver"
 DEST="${PWD}"
-DISPLAY_NAME="Office Display"
+DISPLAY_NAME="DeskExtend Display"
 
 # Parse arguments
 for arg in "$@"; do
@@ -53,4 +53,4 @@ fi
 
 echo "Update complete. Starting DeskExtend Receiver..."
 . "$DEST/venv/bin/activate"
-"$DEST/venv/bin/python" "$DEST/receiver.py" --mode hybrid --name "$DISPLAY_NAME"
+"$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME"
