@@ -87,4 +87,4 @@ if [ -z "$XAUTHORITY" ] && [ -f "/home/pi/.Xauthority" ]; then
 fi
 
 . "$DEST/venv/bin/activate"
-env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME"
+env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME" --mode "network"
