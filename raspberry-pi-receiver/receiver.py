@@ -538,6 +538,17 @@ class VideoReceiver:
                         chromium_user = 'ubuntu'
                     except KeyError:
                         pass
+        
+        # Set up X11 authentication for privilege-dropped user
+        if chromium_user and os.geteuid() == 0:
+            try:
+                user_info = pwd.getpwnam(chromium_user)
+                xauth_file = os.path.join(user_info.pw_dir, '.Xauthority')
+                if os.path.exists(xauth_file):
+                    env['XAUTHORITY'] = xauth_file
+                    env['HOME'] = user_info.pw_dir
+            except (KeyError, Exception):
+                pass
 
         if not self.unclutter_process or self.unclutter_process.poll() is not None:
             try:
@@ -554,17 +565,21 @@ class VideoReceiver:
                 self.unclutter_process = None
 
         try:
-            popen_kwargs = {
-                'env': env,
-                'stdout': subprocess.DEVNULL,
-                'stderr': subprocess.DEVNULL
-            }
-            if chromium_user:
-                popen_kwargs['user'] = chromium_user
+            if chromium_user and os.geteuid() == 0:
+                try:
+                    user_info = pwd.getpwnam(chromium_user)
+                    chromium_args = [
+                        'runuser', '-u', chromium_user, '--',
+                        *chromium_args
+                    ]
+                except KeyError:
+                    logger.warning(f"User {chromium_user} not found, running as root")
             
             self.chromium_process = subprocess.Popen(
                 [*chromium_args],
-                **popen_kwargs
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
             )
             logger.info("Chromium kiosk mode started with display (pid=%s)", getattr(self.chromium_process, 'pid', None))
 
