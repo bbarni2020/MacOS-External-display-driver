@@ -253,6 +253,7 @@ class VideoReceiver:
         self.startup_flag = {'play': False}
         self.display_connected = False
         self.display_check_thread = None
+        self.is_video_streaming = False
     
     def get_cpu_temp(self):
         try:
@@ -1055,56 +1056,66 @@ class VideoReceiver:
     
     def process_stream(self, conn):
         logger.info("Processing video stream...")
+        self.hide_chromium_kiosk()
+        self.is_video_streaming = True
         
         buffer = b''
         is_serial = serial and hasattr(serial, 'Serial') and isinstance(conn, serial.Serial)
         
-        while self.running:
-            try:
-                chunk = self.read_from_connection(conn)
-                if chunk is None:
-                    break
-                if not chunk:
-                    if is_serial:
-                        import time
-                        time.sleep(0.001)
-                    continue
-                
-                buffer += chunk
-                self.bytes_received += len(chunk)
-                
-                while len(buffer) >= 4:
-                    frame_size = struct.unpack('>I', buffer[:4])[0]
-                    
-                    if frame_size > 10485760:
-                        logger.warning(f"Invalid frame size: {frame_size}")
-                        buffer = buffer[1:]
+        try:
+            while self.running:
+                try:
+                    chunk = self.read_from_connection(conn)
+                    if chunk is None:
+                        break
+                    if not chunk:
+                        if is_serial:
+                            import time
+                            time.sleep(0.001)
                         continue
                     
-                    if len(buffer) < 4 + frame_size:
-                        break
+                    buffer += chunk
+                    self.bytes_received += len(chunk)
                     
-                    frame_data = buffer[4:4 + frame_size]
-                    buffer = buffer[4 + frame_size:]
-                    
-                    if self.decoder_process and self.decoder_process.stdin:
-                        try:
-                            self.decoder_process.stdin.write(frame_data)
-                            self.decoder_process.stdin.flush()
-                            self.update_fps()
-                        except BrokenPipeError:
-                            logger.error("Decoder pipe broken - restarting...")
-                            return False
-                        except Exception as e:
-                            logger.error(f"Decoder write error: {e}")
-                            return False
-                    
-            except socket.error as e:
-                logger.error(f"Socket error: {e}")
-                break
-            except Exception as e:
-                logger.error(f"Stream error: {e}")
-                break
+                    while len(buffer) >= 4:
+                        frame_size = struct.unpack('>I', buffer[:4])[0]
+                        
+                        if frame_size > 10485760:
+                            logger.warning(f"Invalid frame size: {frame_size}")
+                            buffer = buffer[1:]
+                            continue
+                        
+                        if len(buffer) < 4 + frame_size:
+                            break
+                        
+                        frame_data = buffer[4:4 + frame_size]
+                        buffer = buffer[4 + frame_size:]
+                        
+                        if self.decoder_process and self.decoder_process.stdin:
+                            try:
+                                self.decoder_process.stdin.write(frame_data)
+                                self.decoder_process.stdin.flush()
+                                self.update_fps()
+                            except BrokenPipeError:
+                                logger.error("Decoder pipe broken - restarting...")
+                                self.is_video_streaming = False
+                                self.show_chromium_kiosk()
+                                return False
+                            except Exception as e:
+                                logger.error(f"Decoder write error: {e}")
+                                self.is_video_streaming = False
+                                self.show_chromium_kiosk()
+                                return False
+                        
+                except socket.error as e:
+                    logger.error(f"Socket error: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"Stream error: {e}")
+                    break
+        finally:
+            self.is_video_streaming = False
+            self.show_chromium_kiosk()
         
         return True
     
