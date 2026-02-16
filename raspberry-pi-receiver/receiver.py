@@ -10,6 +10,7 @@ import time
 import os
 import logging
 import shutil
+import pwd
 try:
     import serial
 except Exception:
@@ -510,28 +511,33 @@ class VideoReceiver:
         env = os.environ.copy()
         if 'DISPLAY' not in env:
             env['DISPLAY'] = ':0'
-        if os.geteuid() == 0:
-            sudo_user = os.environ.get('SUDO_USER')
-            if sudo_user:
-                xauth = f"/home/{sudo_user}/.Xauthority"
-                if os.path.exists(xauth):
-                    env['XAUTHORITY'] = xauth
-
         chromium_args = [
             chromium_bin,
             f'--app={kiosk_url}',
             '--kiosk',
-            '--noerrdialogs',
             '--disable-infobars',
             '--no-first-run',
             '--disable-session-crashed-bubble',
-            '--disable-translate',
-            '--disable-features=TranslateUI',
             '--start-fullscreen',
             '--window-position=0,0'
         ]
+
+
+        chromium_user = None
         if os.geteuid() == 0:
-            chromium_args.append('--no-sandbox')
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user:
+                chromium_user = sudo_user
+            else:
+                try:
+                    pwd.getpwnam('pi')
+                    chromium_user = 'pi'
+                except KeyError:
+                    try:
+                        pwd.getpwnam('ubuntu')
+                        chromium_user = 'ubuntu'
+                    except KeyError:
+                        pass
 
         if not self.unclutter_process or self.unclutter_process.poll() is not None:
             try:
@@ -548,11 +554,17 @@ class VideoReceiver:
                 self.unclutter_process = None
 
         try:
+            popen_kwargs = {
+                'env': env,
+                'stdout': subprocess.DEVNULL,
+                'stderr': subprocess.DEVNULL
+            }
+            if chromium_user:
+                popen_kwargs['user'] = chromium_user
+            
             self.chromium_process = subprocess.Popen(
                 [*chromium_args],
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                **popen_kwargs
             )
             logger.info("Chromium kiosk mode started with display (pid=%s)", getattr(self.chromium_process, 'pid', None))
 
