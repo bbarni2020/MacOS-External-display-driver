@@ -12,7 +12,6 @@ for arg in "$@"; do
     branch=*) BRANCH="${arg#branch=}" ;;
   esac
 done
-sleep 15
 echo "Updating DeskExtend Receiver from $REPO (branch $BRANCH)..."
 
 TMPDIR=$(mktemp -d)
