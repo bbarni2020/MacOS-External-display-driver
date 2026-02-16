@@ -587,29 +587,44 @@ class VideoReceiver:
             return False
         end = time.time() + timeout
         candidates = ['Chromium', 'chromium', 'DeskExtend', '127.0.0.1', 'Dashboard']
+        class_candidates = ['chromium.Chromium', 'chromium-browser.Chromium', 'Chromium.Chromium']
         while time.time() < end:
             try:
-                proc = subprocess.run(['wmctrl', '-l'], capture_output=True, text=True, timeout=1)
+                proc = subprocess.run(['wmctrl', '-l', '-x'], capture_output=True, text=True, timeout=1)
                 out = proc.stdout if proc.returncode == 0 else ''
                 for line in out.splitlines():
-                    for pat in candidates:
-                        if pat in line:
-                            parts = line.split()
-                            if not parts:
-                                continue
-                            win_id = parts[0]
-                            try:
-                                subprocess.run(['wmctrl', '-i', '-R', win_id], timeout=1)
-                                subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'add,fullscreen'], timeout=1)
-                                return True
-                            except Exception:
-                                continue
+                    parts = line.split()
+                    if not parts:
+                        continue
+                    win_id = parts[0]
+                    wm_class = parts[2] if len(parts) > 2 else ''
+
+                    matched = any(pat in line for pat in candidates) or any(cls == wm_class for cls in class_candidates)
+                    if not matched:
+                        continue
+                    try:
+                        subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'remove,hidden'], timeout=1)
+                        subprocess.run(['wmctrl', '-i', '-R', win_id], timeout=1)
+                        subprocess.run(['wmctrl', '-i', '-r', win_id, '-b', 'add,above,fullscreen'], timeout=1)
+                        return True
+                    except Exception:
+                        continue
             except Exception:
                 pass
             time.sleep(0.2)
         return False
 
     def show_chromium_kiosk(self):
+        if self.chromium_process and self.chromium_process.poll() is None:
+            try:
+                if self.has_wmctrl():
+                    self.bring_chromium_window(timeout=5.0)
+                else:
+                    os.kill(self.chromium_process.pid, signal.SIGCONT)
+            except Exception:
+                pass
+            return
+
         if not self.start_chromium_kiosk():
             return
 
