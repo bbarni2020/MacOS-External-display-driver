@@ -12,7 +12,7 @@ for arg in "$@"; do
     branch=*) BRANCH="${arg#branch=}" ;;
   esac
 done
-
+sleep 15
 echo "Updating DeskExtend Receiver from $REPO (branch $BRANCH)..."
 
 TMPDIR=$(mktemp -d)
@@ -87,4 +87,4 @@ if [ -z "$XAUTHORITY" ] && [ -f "/home/pi/.Xauthority" ]; then
 fi
 
 . "$DEST/venv/bin/activate"
-env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME" --mode "network"
+env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME"
