@@ -263,17 +263,28 @@ class VideoReceiver:
     
     def check_display_connected(self):
         try:
+            display_env = os.environ.get('DISPLAY', ':0')
             result = subprocess.run(
                 ['xrandr', '--query'],
                 capture_output=True,
                 text=True,
                 timeout=2,
-                env={**os.environ, 'DISPLAY': os.environ.get('DISPLAY', ':0')}
+                env={**os.environ, 'DISPLAY': display_env}
             )
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
                     if ' connected' in line and 'disconnected' not in line:
                         return True
+
+
+            for status_path in glob.glob('/sys/class/drm/*/status'):
+                try:
+                    with open(status_path, 'r') as f:
+                        if f.read().strip().lower() == 'connected':
+                            return True
+                except Exception:
+                    continue
+
             return False
         except Exception as e:
             logger.debug(f"Display check failed: {e}")
