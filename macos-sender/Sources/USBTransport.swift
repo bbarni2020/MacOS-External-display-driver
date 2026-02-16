@@ -102,8 +102,9 @@ class USBDeviceDetector {
         
         guard let contents = try? fileManager.contentsOfDirectory(atPath: devPath) else { return [] }
         
+        let prefixes = ["tty.usbmodem", "cu.usbmodem", "tty.usbserial", "cu.usbserial"]
         let devices = contents
-            .filter { $0.hasPrefix("tty.usbmodem") || $0.hasPrefix("cu.usbmodem") }
+            .filter { item in prefixes.contains(where: { item.hasPrefix($0) }) }
             .map { "\(devPath)/\($0)" }
             .sorted()
         

@@ -64,6 +64,10 @@ class SenderController {
         
         let captureEngine = ScreenCaptureEngine(config: request.config, targetDisplay: targetDisplayUnwrapped, encoder: encoder)
         self.screenCaptureEngine = captureEngine
+
+        if !captureStarted {
+            startCapture()
+        }
     }
     
     private func handleConnectionStatusChange(connected: Bool, address: String, request: ConnectionRequest) {
@@ -80,8 +84,6 @@ class SenderController {
         
         if connected && !captureStarted {
             startCapture()
-        } else if !connected && captureStarted {
-            stopCapture()
         }
     }
     

@@ -56,6 +56,10 @@ class ConnectionManager: ObservableObject {
         default:
             break
         }
+
+        if !displayStarted {
+            startDisplay()
+        }
     }
     
     private func handleConnectionStatus(connected: Bool, address: String) {
@@ -64,8 +68,6 @@ class ConnectionManager: ObservableObject {
         
         if connected && !displayStarted {
             startDisplay()
-        } else if !connected && displayStarted {
-            stopDisplay()
         }
     }
     

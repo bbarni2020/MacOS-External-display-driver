@@ -254,6 +254,7 @@ class VideoReceiver:
         self.display_connected = False
         self.display_check_thread = None
         self.is_video_streaming = False
+        self.serial_idle_timeout = float(os.environ.get('DESKEXTEND_USB_IDLE_TIMEOUT', '5'))
     
     def get_cpu_temp(self):
         try:
@@ -460,7 +461,7 @@ class VideoReceiver:
     
     @staticmethod
     def detect_all_devices():
-        patterns = ['/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*', '/dev/tty.*', '/dev/cu.*', '/dev/serial/by-id/*']
+        patterns = ['/dev/ttyGS*', '/dev/ttyUSB*', '/dev/ttyACM*', '/dev/cu.usbmodem*', '/dev/tty.*', '/dev/cu.*', '/dev/serial/by-id/*']
         devices = []
         for pattern in patterns:
             devices.extend(glob.glob(pattern))
@@ -469,6 +470,8 @@ class VideoReceiver:
 
     @staticmethod
     def detect_usb_device():
+        if os.path.exists('/dev/ttyGS0'):
+            return '/dev/ttyGS0'
         devices = VideoReceiver.detect_all_devices()
         return devices[0] if devices else None
     
@@ -1050,7 +1053,7 @@ class VideoReceiver:
             return b''
         except Exception as e:
             if serial and hasattr(serial, 'SerialException') and isinstance(e, serial.SerialException):
-                return b''
+                return None
             logger.error(f"Read error: {e}")
             return None
     
@@ -1061,6 +1064,7 @@ class VideoReceiver:
         
         buffer = b''
         is_serial = serial and hasattr(serial, 'Serial') and isinstance(conn, serial.Serial)
+        last_data_time = time.time()
         
         try:
             while self.running:
@@ -1070,9 +1074,13 @@ class VideoReceiver:
                         break
                     if not chunk:
                         if is_serial:
-                            import time
+                            if time.time() - last_data_time > self.serial_idle_timeout:
+                                logger.info("USB stream idle, reconnecting...")
+                                return False
                             time.sleep(0.001)
                         continue
+                    if is_serial:
+                        last_data_time = time.time()
                     
                     buffer += chunk
                     self.bytes_received += len(chunk)
@@ -1124,6 +1132,8 @@ class VideoReceiver:
         self.running = True
         
         logger.info(f"Starting USB mode on device: {self.usb_device}")
+        retry_delay = 1.0
+        max_retry_delay = 15.0
         
         self.show_chromium_kiosk()
         
@@ -1133,6 +1143,9 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
                     
+                if self.usb_device and not os.path.exists(self.usb_device):
+                    self.usb_device = None
+
                 if self.usb_device:
                     opened = self.open_usb()
                     if not opened:
@@ -1144,7 +1157,8 @@ class VideoReceiver:
                                 break
                         if not opened:
                             logger.warning("Retrying USB connection in 3 seconds...")
-                            time.sleep(3)
+                            time.sleep(retry_delay)
+                            retry_delay = min(max_retry_delay, retry_delay * 1.5)
                             continue
                 else:
                     opened = False
@@ -1155,7 +1169,8 @@ class VideoReceiver:
                             break
                     if not opened:
                         logger.warning("No USB device found, retrying in 3 seconds...")
-                        time.sleep(3)
+                        time.sleep(retry_delay)
+                        retry_delay = min(max_retry_delay, retry_delay * 1.5)
                         continue
 
                 self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
@@ -1163,10 +1178,12 @@ class VideoReceiver:
                 if not self.start_decoder():
                     self.close_usb()
                     self.show_chromium_kiosk()
-                    time.sleep(3)
+                    time.sleep(retry_delay)
+                    retry_delay = min(max_retry_delay, retry_delay * 1.5)
                     continue
                 
                 logger.info(f"[{self.device_name}] USB connection established")
+                retry_delay = 1.0
                 self.frame_count = 0
                 self.bytes_received = 0
                 self.last_fps_time = time.time()
@@ -1192,12 +1209,15 @@ class VideoReceiver:
                     logger.error(f"USB error: {e}")
                     self.close_usb()
                     self.show_chromium_kiosk()
-                    time.sleep(3)
+                    time.sleep(retry_delay)
+                    retry_delay = min(max_retry_delay, retry_delay * 1.5)
     
     def run_hybrid(self):
         self.running = True
         
         logger.info("Starting hybrid mode (USB priority with network fallback)")
+        retry_delay = 1.0
+        max_retry_delay = 15.0
         
         self.show_chromium_kiosk()
         
@@ -1211,6 +1231,9 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
                     
+                if self.usb_device and not os.path.exists(self.usb_device):
+                    self.usb_device = None
+
                 if self.usb_device and not usb_active and not usb_failed:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if not self.open_usb():
@@ -1224,10 +1247,12 @@ class VideoReceiver:
                             logger.warning("USB connection failed, falling back to network...")
                             usb_failed = True
                             self.usb_device = None
+                            retry_delay = min(max_retry_delay, retry_delay * 1.5)
                         else:
                             usb_active = True
                     else:
                         usb_active = True
+                        retry_delay = 1.0
 
                     if usb_active:
                         self.schedule_hide_when_window_present(['vaapisink', 'autovideosink', 'gst-launch-1.0'], appear_timeout=3.0, after_delay=5.0)
@@ -1235,8 +1260,10 @@ class VideoReceiver:
                             self.close_usb()
                             usb_active = False
                             self.show_chromium_kiosk()
+                            retry_delay = min(max_retry_delay, retry_delay * 1.5)
                         else:
                             logger.info("USB connected, processing stream...")
+                            retry_delay = 1.0
                             self.frame_count = 0
                             self.bytes_received = 0
                             self.last_fps_time = time.time()
@@ -1257,7 +1284,8 @@ class VideoReceiver:
                 
                 logger.info(f"[{self.device_name}] Listening on network {self.host}:{self.port}")
                 if not self.bind_socket():
-                    time.sleep(3)
+                    time.sleep(retry_delay)
+                    retry_delay = min(max_retry_delay, retry_delay * 1.5)
                 
                 logger.info(f"[{self.device_name}] Waiting for network connection...")
                 self.sock.settimeout(2.0)
@@ -1308,7 +1336,8 @@ class VideoReceiver:
                         self.sock.close()
                     self.close_usb()
                     self.show_chromium_kiosk()
-                    time.sleep(3)
+                    time.sleep(retry_delay)
+                    retry_delay = min(max_retry_delay, retry_delay * 1.5)
     
     def run(self):
         self.running = True

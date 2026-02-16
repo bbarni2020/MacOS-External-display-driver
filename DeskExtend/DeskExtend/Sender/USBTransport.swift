@@ -115,7 +115,7 @@ enum USBDeviceDetector {
         let manager = FileManager.default
         let devPath = "/dev"
         guard let contents = try? manager.contentsOfDirectory(atPath: devPath) else { return [] }
-        let prefixes = ["cu.usbmodem"]
+        let prefixes = ["cu.usbmodem", "tty.usbmodem", "cu.usbserial", "tty.usbserial"]
         return contents
             .filter { item in prefixes.contains(where: { item.hasPrefix($0) }) }
             .map { "\(devPath)/\($0)" }
