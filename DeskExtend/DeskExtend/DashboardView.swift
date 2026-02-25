@@ -382,7 +382,6 @@ struct ConnectionTabView: View {
                     Button(action: {
                         let trimmed = piAddressInput.trimmingCharacters(in: .whitespaces)
                         let port = Int(piPort) ?? 5900
-                        appManager.usbDevice = usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput
                         appManager.connect(to: trimmed, port: port)
                     }) {
                         Label("Connect", systemImage: "bolt.horizontal.fill")

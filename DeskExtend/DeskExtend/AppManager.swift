@@ -29,11 +29,15 @@ final class AppManager: ObservableObject {
     }
     @Published var usbDevices: [String] = []
     @Published var usbDeviceNames: [String] = []
+    private var usbRefreshTimer: Timer?
+
     func refreshUsbDevices() {
         let devices = USBDeviceDetector.allDevices()
         usbDevices = devices.map { $0.path }
         usbDeviceNames = devices.map { $0.name }
-        if let first = usbDevices.first, usbDevice.isEmpty {
+
+        guard let first = usbDevices.first else { return }
+        if usbDevice.isEmpty || !usbDevices.contains(usbDevice) {
             usbDevice = first
         }
     }
@@ -82,6 +86,8 @@ final class AppManager: ObservableObject {
     
     func start() {
         isRunning = true
+        refreshUsbDevices()
+        startUsbDeviceRefreshLoop()
     }
     
     func connect(to address: String, port: Int) {
@@ -125,7 +131,23 @@ final class AppManager: ObservableObject {
     
     func stop() {
         isRunning = false
+        stopUsbDeviceRefreshLoop()
         disconnect()
+    }
+
+    private func startUsbDeviceRefreshLoop() {
+        if usbRefreshTimer != nil { return }
+        usbRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            if self.connectionMode != .network {
+                self.refreshUsbDevices()
+            }
+        }
+    }
+
+    private func stopUsbDeviceRefreshLoop() {
+        usbRefreshTimer?.invalidate()
+        usbRefreshTimer = nil
     }
 
     func applyVirtualDisplayConfig() {
@@ -173,6 +195,7 @@ final class AppManager: ObservableObject {
     
     deinit {
         statsTimer?.invalidate()
+        usbRefreshTimer?.invalidate()
     }
 
     private func buildConfig() -> DisplayConfig {

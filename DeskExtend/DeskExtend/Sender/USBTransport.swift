@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 final class USBTransport {
     private let devicePath: String
@@ -27,19 +28,62 @@ final class USBTransport {
     }
 
     private func openDevice() {
-        do {
-            fileHandle = FileHandle(forWritingAtPath: devicePath)
-            guard fileHandle != nil else {
-                logCallback?("Cannot open device at \(devicePath)")
-                statusCallback?(false, "Not connected")
-                isConnected = false
-                return
-            }
-            isConnected = true
-            connectedAddress = "USB: \(devicePath)"
-            logCallback?("Connected to USB device at \(devicePath)")
-            statusCallback?(true, connectedAddress)
+        let fd = open(devicePath, O_RDWR | O_NOCTTY)
+        guard fd >= 0 else {
+            let reason = String(cString: strerror(errno))
+            logCallback?("Cannot open device at \(devicePath): \(reason)")
+            statusCallback?(false, "Not connected")
+            isConnected = false
+            return
         }
+
+        guard configureSerialDevice(fd: fd) else {
+            let reason = String(cString: strerror(errno))
+            close(fd)
+            logCallback?("Cannot configure serial device \(devicePath): \(reason)")
+            statusCallback?(false, "Not connected")
+            isConnected = false
+            return
+        }
+
+        fileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        isConnected = true
+        connectedAddress = "USB: \(devicePath)"
+        logCallback?("Connected to USB device at \(devicePath)")
+        statusCallback?(true, connectedAddress)
+    }
+
+    private func configureSerialDevice(fd: Int32) -> Bool {
+        var options = termios()
+        if tcgetattr(fd, &options) != 0 {
+            return false
+        }
+
+        cfmakeraw(&options)
+        options.c_cflag |= (CLOCAL | CREAD)
+        options.c_cflag &= ~tcflag_t(PARENB)
+        options.c_cflag &= ~tcflag_t(CSTOPB)
+        options.c_cflag &= ~tcflag_t(CSIZE)
+        options.c_cflag |= tcflag_t(CS8)
+        options.c_iflag = 0
+        options.c_oflag = 0
+        options.c_lflag = 0
+        options.c_cc.16 = 0
+        options.c_cc.17 = 1
+
+        if cfsetispeed(&options, speed_t(B115200)) != 0 {
+            return false
+        }
+        if cfsetospeed(&options, speed_t(B115200)) != 0 {
+            return false
+        }
+
+        if tcsetattr(fd, TCSANOW, &options) != 0 {
+            return false
+        }
+
+        _ = tcflush(fd, TCIOFLUSH)
+        return true
     }
 
     func send(data: Data) {
@@ -108,18 +152,35 @@ enum USBDeviceDetector {
             return devices
         }
         
-        return listModemDevices().map { (path: $0, name: "Unknown Device") }
+        return listModemDevices().map { devicePath in
+            let baseName = (devicePath as NSString).lastPathComponent
+            return (path: devicePath, name: "USB Accessory (\(baseName))")
+        }
     }
     
     private static func listModemDevices() -> [String] {
         let manager = FileManager.default
         let devPath = "/dev"
         guard let contents = try? manager.contentsOfDirectory(atPath: devPath) else { return [] }
-        let prefixes = ["cu.usbmodem", "tty.usbmodem", "cu.usbserial", "tty.usbserial"]
-        return contents
+        let prefixes = ["cu.usbmodem", "tty.usbmodem", "cu.usbserial", "tty.usbserial", "cu.usb", "tty.usb"]
+        let devices = contents
             .filter { item in prefixes.contains(where: { item.hasPrefix($0) }) }
             .map { "\(devPath)/\($0)" }
-            .sorted()
+        return preferredDeviceOrder(devices)
+    }
+
+    private static func preferredDeviceOrder(_ devices: [String]) -> [String] {
+        let unique = Array(Set(devices))
+        return unique.sorted { left, right in
+            let leftBase = (left as NSString).lastPathComponent
+            let rightBase = (right as NSString).lastPathComponent
+            let leftIsCallout = leftBase.hasPrefix("cu.")
+            let rightIsCallout = rightBase.hasPrefix("cu.")
+            if leftIsCallout != rightIsCallout {
+                return leftIsCallout
+            }
+            return leftBase < rightBase
+        }
     }
     
     private static func extractDeviceName(_ devicePath: String) -> String? {

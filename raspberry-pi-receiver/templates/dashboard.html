@@ -144,6 +144,19 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             opacity: 0.7;
         }
+        .usb-accessory {
+            position: fixed;
+            top: 2em;
+            left: 2em;
+            font-size: 0.85em;
+            font-weight: 500;
+            color: #b0b0b8;
+            background: rgba(30,30,30,0.5);
+            border-radius: 1em;
+            padding: 0.5em 1.1em;
+            opacity: 0.7;
+            z-index: 20;
+        }
         .spotify-widget {
             position: absolute;
             left: 50%;
@@ -357,6 +370,9 @@
     <div class="internet-status" id="internet-status" style="display:none;">
         <span id="status-text">Offline</span>
     </div>
+    <div class="usb-accessory" id="usb-accessory" style="display:none;">
+        <span id="usb-accessory-text">USB accessory: none</span>
+    </div>
     <script>
         function playStartupAnimation() {
             const overlay = document.getElementById('startup-overlay');
@@ -447,6 +463,30 @@
                 .catch(() => {
                     document.getElementById('internet-status').style.display = '';
                     document.getElementById('status-text').textContent = 'Offline';
+                });
+        }
+        function updateUsbAccessories() {
+            fetch('/usb-accessories')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('usb-accessory');
+                    const text = document.getElementById('usb-accessory-text');
+                    const selected = data && data.selected ? data.selected : null;
+                    const devices = data && Array.isArray(data.devices) ? data.devices : [];
+                    if (!selected && devices.length === 0) {
+                        container.style.display = 'none';
+                        return;
+                    }
+                    const selectedName = selected ? selected.split('/').pop() : null;
+                    if (selectedName) {
+                        text.textContent = 'USB accessory: ' + selectedName + (data.connected ? ' (connected)' : '');
+                    } else {
+                        text.textContent = 'USB accessory: detected';
+                    }
+                    container.style.display = '';
+                })
+                .catch(() => {
+                    document.getElementById('usb-accessory').style.display = 'none';
                 });
         }
         function updateWeather() {
@@ -574,18 +614,25 @@
                 checkInternet();
             }
         }
+        function updateUsbAccessoriesConditional() {
+            if (displayConnected) {
+                updateUsbAccessories();
+            }
+        }
         updateTime();
         checkDisplayStatus();
         updateStats();
         checkInternet();
         updateWeather();
         updateSpotify();
+        updateUsbAccessories();
         setInterval(updateTime, 1000);
         setInterval(checkDisplayStatus, 5000);
         setInterval(updateStatsConditional, 5000);
         setInterval(checkInternetConditional, 10000);
         setInterval(updateWeatherConditional, 1800000);
         setInterval(updateSpotifyConditional, 5000);
+        setInterval(updateUsbAccessoriesConditional, 1000);
     </script>
 </body>
 </html>

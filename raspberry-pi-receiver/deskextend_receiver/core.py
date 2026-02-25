@@ -74,6 +74,75 @@ class VideoReceiver:
         self.display_check_thread = None
         self.is_video_streaming = False
         self.serial_idle_timeout = float(os.environ.get("DESKEXTEND_USB_IDLE_TIMEOUT", "5"))
+        self.stream_state_lock = threading.Lock()
+        self.active_streams = 0
+        self.usb_state_lock = threading.Lock()
+        self.available_usb_devices = []
+        self.usb_monitor_thread = None
+        self.usb_scan_interval = float(os.environ.get("DESKEXTEND_USB_SCAN_INTERVAL", "1"))
+        self.refresh_usb_devices()
+
+    def mark_stream_connected(self, transport_name):
+        with self.stream_state_lock:
+            self.active_streams += 1
+            should_hide = self.active_streams == 1
+        logger.info("%s stream connected", transport_name)
+        if should_hide:
+            self.hide_chromium_kiosk()
+
+    def mark_stream_disconnected(self, transport_name):
+        with self.stream_state_lock:
+            self.active_streams = max(0, self.active_streams - 1)
+            should_show = self.active_streams == 0
+        logger.info("%s stream disconnected", transport_name)
+        if should_show:
+            self.show_chromium_kiosk()
+
+    def refresh_usb_devices(self):
+        devices = detect_all_devices()
+        with self.usb_state_lock:
+            previous = set(self.available_usb_devices)
+            self.available_usb_devices = devices
+
+        added = [dev for dev in devices if dev not in previous]
+        removed = [dev for dev in previous if dev not in set(devices)]
+
+        for device in added:
+            logger.info("USB accessory detected: %s", device)
+        for device in removed:
+            logger.info("USB accessory removed: %s", device)
+
+        with self.usb_state_lock:
+            if self.usb_device and self.usb_device not in self.available_usb_devices:
+                self.usb_device = None
+            if not self.usb_device and self.available_usb_devices:
+                self.usb_device = self.available_usb_devices[0]
+                logger.info("Auto-selected USB accessory: %s", self.usb_device)
+            current = self.usb_device
+
+        return list(devices), current
+
+    def get_available_usb_devices(self):
+        with self.usb_state_lock:
+            return list(self.available_usb_devices)
+
+    def start_usb_monitor(self):
+        if self.mode not in ["usb", "hybrid", "all"]:
+            return
+        if self.usb_monitor_thread and self.usb_monitor_thread.is_alive():
+            return
+
+        def loop():
+            interval = max(0.2, self.usb_scan_interval)
+            while self.running:
+                try:
+                    self.refresh_usb_devices()
+                except Exception as e:
+                    logger.warning(f"USB monitor error: {e}")
+                time.sleep(interval)
+
+        self.usb_monitor_thread = threading.Thread(target=loop, daemon=True)
+        self.usb_monitor_thread.start()
 
     def get_cpu_temp(self):
         try:
@@ -168,6 +237,23 @@ class VideoReceiver:
         @self.app.route("/display-status")
         def display_status():
             return {"connected": self.display_connected}
+
+        @self.app.route("/usb-accessories")
+        def usb_accessories():
+            devices, selected = self.refresh_usb_devices()
+            connected = bool(self.serial_conn and getattr(self.serial_conn, "is_open", False))
+            return {
+                "connected": connected,
+                "selected": selected,
+                "devices": [
+                    {
+                        "path": path,
+                        "name": os.path.basename(path),
+                        "type": "usb-accessory"
+                    }
+                    for path in devices
+                ]
+            }
 
         @self.app.route("/weather")
         def weather():
@@ -468,6 +554,10 @@ class VideoReceiver:
         return False
 
     def show_chromium_kiosk(self):
+        with self.stream_state_lock:
+            if self.active_streams > 0:
+                return
+
         if self.chromium_process and self.chromium_process.poll() is None:
             try:
                 if self.has_wmctrl():
@@ -868,11 +958,12 @@ class VideoReceiver:
 
     def process_stream(self, conn):
         logger.info("Processing video stream...")
-        self.hide_chromium_kiosk()
+        is_serial = serial and hasattr(serial, "Serial") and isinstance(conn, serial.Serial)
+        transport_name = "USB" if is_serial else "Network"
+        self.mark_stream_connected(transport_name)
         self.is_video_streaming = True
 
         buffer = b""
-        is_serial = serial and hasattr(serial, "Serial") and isinstance(conn, serial.Serial)
         last_data_time = time.time()
 
         try:
@@ -933,7 +1024,7 @@ class VideoReceiver:
                     break
         finally:
             self.is_video_streaming = False
-            self.show_chromium_kiosk()
+            self.mark_stream_disconnected(transport_name)
 
         return True
 
@@ -952,14 +1043,13 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
 
-                if self.usb_device and not os.path.exists(self.usb_device):
-                    self.usb_device = None
+                self.refresh_usb_devices()
 
                 if self.usb_device:
                     opened = self.open_usb()
                     if not opened:
                         opened = False
-                        for dev in detect_all_devices():
+                        for dev in self.get_available_usb_devices():
                             self.usb_device = dev
                             if self.open_usb():
                                 opened = True
@@ -971,7 +1061,7 @@ class VideoReceiver:
                             continue
                 else:
                     opened = False
-                    for dev in detect_all_devices():
+                    for dev in self.get_available_usb_devices():
                         self.usb_device = dev
                         if self.open_usb():
                             opened = True
@@ -1045,11 +1135,11 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
 
-                if self.usb_device and not os.path.exists(self.usb_device):
-                    self.usb_device = None
+                self.refresh_usb_devices()
 
                 if not self.usb_device and time.time() >= next_usb_scan:
-                    detected = detect_usb_device()
+                    devices = self.get_available_usb_devices()
+                    detected = devices[0] if devices else None
                     if detected:
                         self.usb_device = detected
                         usb_scan_delay = 1.0
@@ -1061,7 +1151,7 @@ class VideoReceiver:
                     logger.info(f"Attempting USB connection: {self.usb_device}")
                     if not self.open_usb():
                         opened = False
-                        for dev in detect_all_devices():
+                        for dev in self.get_available_usb_devices():
                             self.usb_device = dev
                             if self.open_usb():
                                 opened = True
@@ -1172,6 +1262,7 @@ class VideoReceiver:
 
     def run(self):
         self.running = True
+        self.start_usb_monitor()
 
         if self.mode == "usb":
             self.run_usb()
