@@ -979,7 +979,7 @@ class VideoReceiver:
             return []
         return sorted(set(interfaces))
 
-    def is_allowed_network_client(self, client_ip, mode_name):
+    def is_allowed_network_client(self, client_ip, mode_name, scope_id=0):
         if mode_name not in ("network", "ethernet"):
             return True
 
@@ -991,6 +991,22 @@ class VideoReceiver:
                 logger.warning("No allowed Ethernet interfaces detected; rejecting client %s", client_ip)
                 return False
             return True
+        
+        if scope_id != 0:
+            try:
+                for iface in os.listdir("/sys/class/net"):
+                    try:
+                        with open(f"/sys/class/net/{iface}/ifindex", "r") as f:
+                            if int(f.read().strip()) == scope_id:
+                                if iface in allowed_interfaces:
+                                    return True
+                                elif strict:
+                                    logger.warning("Rejected client %s on disallowed interface %s", client_ip, iface)
+                                    return False
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
         try:
             result = subprocess.run(
@@ -1438,7 +1454,8 @@ class VideoReceiver:
                     logger.info(f"[{self.device_name}] Connected from {addr}")
 
                     client_ip = addr[0] if isinstance(addr, tuple) else str(addr)
-                    if not self.is_allowed_network_client(client_ip, "ethernet"):
+                    scope_id = addr[3] if isinstance(addr, tuple) and len(addr) == 4 else 0
+                    if not self.is_allowed_network_client(client_ip, "ethernet", scope_id):
                         logger.warning("Rejected non-Ethernet client in hybrid fallback mode: %s", client_ip)
                         conn.close()
                         continue
@@ -1548,7 +1565,8 @@ class VideoReceiver:
                 logger.info(f"[{self.device_name}] Connected from {addr}")
 
                 client_ip = addr[0] if isinstance(addr, tuple) else str(addr)
-                if not self.is_allowed_network_client(client_ip, "network"):
+                scope_id = addr[3] if isinstance(addr, tuple) and len(addr) == 4 else 0
+                if not self.is_allowed_network_client(client_ip, "network", scope_id):
                     logger.warning("Rejected client outside network mode policy: %s", client_ip)
                     conn.close()
                     continue
@@ -1621,7 +1639,8 @@ class VideoReceiver:
                 logger.info(f"[{self.device_name}] Ethernet connected from {addr}")
 
                 client_ip = addr[0] if isinstance(addr, tuple) else str(addr)
-                if not self.is_allowed_network_client(client_ip, "ethernet"):
+                scope_id = addr[3] if isinstance(addr, tuple) and len(addr) == 4 else 0
+                if not self.is_allowed_network_client(client_ip, "ethernet", scope_id):
                     logger.warning("Rejected non-Ethernet client in ethernet mode: %s", client_ip)
                     conn.close()
                     continue
