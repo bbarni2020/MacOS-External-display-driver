@@ -1,11 +1,5 @@
 import Foundation
 
-struct DisplayConfig {
-    let width: Int
-    let height: Int
-    let fps: Int
-    let bitrate: Int
-}
 
 struct ConnectionStats {
     var isConnected = false

@@ -16,6 +16,7 @@ class DashboardViewController: NSViewController {
     private var usbDevicePopup: NSPopUpButton!
     private var usbDeviceContainer: NSView!
     private var addressInputContainer: NSView!
+    private var manualEthernetCheckbox: NSButton!
     
     private var bitrateSlider: NSSlider!
     private var fpsControl: NSSegmentedControl!
@@ -102,15 +103,27 @@ class DashboardViewController: NSViewController {
         disconnectButton.action = #selector(disconnectButtonClicked)
         disconnectButton.isHidden = true
         addressInputContainer.addSubview(disconnectButton)
+
+        manualEthernetCheckbox = NSButton(checkboxWithTitle: "Manually configure Ethernet target", target: self, action: #selector(manualEthernetToggled))
+        manualEthernetCheckbox.frame = NSRect(x: 20, y: 365, width: 340, height: 18)
+        manualEthernetCheckbox.state = ConfigurationManager.shared.manualEthernetTargetEnabled ? .on : .off
+        view.addSubview(manualEthernetCheckbox)
+
+        addressInput.stringValue = ConfigurationManager.shared.networkHost
+        modeSelector.selectedSegment = selectedSegment(for: ConfigurationManager.shared.connectionMode)
         
         updateUIForMode()
         
         addressLabel = createLabel("—")
-        addressLabel.frame = NSRect(x: 20, y34570, width: 340, height: 15)
+        addressLabel.frame = NSRect(x: 20, y: 345, width: 340, height: 15)
         view.addSubview(addressLabel)
         
         let separator1 = createSeparator()
-        320, width: 80, height: 20)
+        separator1.frame = NSRect(x: 20, y: 340, width: 340, height: 1)
+        view.addSubview(separator1)
+        
+        let bitrateTitle = createLabel("Bitrate:")
+        bitrateTitle.frame = NSRect(x: 30, y: 320, width: 80, height: 20)
         view.addSubview(bitrateTitle)
         
         bitrateLabel = createLabel("0.00 Mbps")
@@ -157,12 +170,6 @@ class DashboardViewController: NSViewController {
         logsTitle.frame = NSRect(x: 20, y: 180, width: 340, height: 20)
         view.addSubview(logsTitle)
 
-        let scrollView = NSScrollView(frame: NSRect(x: 20, y: 50, width: 340, height: 125))
-        scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
-        logTextView = NSTextView(frame: scrollView.bounds)
-        logTextView.isEditable = false
-        logTextView.font = NSFont.monospacedSystemFont(ofSize: 10
         let scrollView = NSScrollView(frame: NSRect(x: 20, y: 50, width: 340, height: 70))
         scrollView.hasVerticalScroller = true
         scrollView.borderType = .bezelBorder
@@ -201,7 +208,8 @@ class DashboardViewController: NSViewController {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            NSView.performWithoutAnimation {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.0
                 self.statusLabel?.stringValue = stats.piAddress != "Not connected" ? "Connected" : "Disconnected"
                 self.statusLabel?.textColor = stats.piAddress != "Not connected" ? NSColor.systemGreen : NSColor.secondaryLabelColor
                 
@@ -260,6 +268,16 @@ class DashboardViewController: NSViewController {
         default: return "usb"
         }
     }
+
+    private func selectedSegment(for mode: String) -> Int {
+        switch mode {
+        case "usb": return 0
+        case "network": return 1
+        case "ethernet": return 2
+        case "hybrid": return 3
+        default: return 0
+        }
+    }
     
     private func updateUIForMode() {
         let mode = getSelectedModeString()
@@ -268,13 +286,28 @@ class DashboardViewController: NSViewController {
         let isNetwork = (mode == "network")
         let isEthernet = (mode == "ethernet")
         let isHybrid = (mode == "hybrid")
+        let manualEthernetEnabled = manualEthernetCheckbox.state == .on
         
         usbDeviceContainer.isHidden = !(isUSB || isHybrid)
+        manualEthernetCheckbox.isHidden = !isEthernet
         addressInputContainer.isHidden = !(isNetwork || isEthernet || isHybrid)
+        addressInput.isHidden = isEthernet && !manualEthernetEnabled
+        addressInput.isEnabled = !isEthernet || manualEthernetEnabled
+        if isEthernet {
+            addressInput.placeholderString = manualEthernetEnabled ? "192.168.1.100 or pi.local" : "Automatic (deskextend.local)"
+        } else {
+            addressInput.placeholderString = "192.168.1.100"
+        }
         
         if isUSB || isHybrid {
             refreshUSBDevices()
         }
+    }
+
+    @objc private func manualEthernetToggled() {
+        let enabled = manualEthernetCheckbox.state == .on
+        ConfigurationManager.shared.manualEthernetTargetEnabled = enabled
+        updateUIForMode()
     }
     
     private func refreshUSBDevices() {
@@ -327,8 +360,14 @@ class DashboardViewController: NSViewController {
         let address = addressInput.stringValue.trimmingCharacters(in: .whitespaces)
         let mode = getSelectedModeString()
         
-        if mode == "network" || mode == "ethernet" || mode == "hybrid" {
+        if mode == "network" || mode == "hybrid" {
             if !address.isEmpty {
+                ConfigurationManager.shared.networkHost = address
+            }
+        } else if mode == "ethernet" {
+            let manualEnabled = manualEthernetCheckbox.state == .on
+            ConfigurationManager.shared.manualEthernetTargetEnabled = manualEnabled
+            if manualEnabled && !address.isEmpty {
                 ConfigurationManager.shared.networkHost = address
             }
         }

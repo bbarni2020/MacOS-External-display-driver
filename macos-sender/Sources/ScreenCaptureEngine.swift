@@ -66,7 +66,9 @@ class ScreenCaptureEngine: NSObject {
         streamConfig.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         streamConfig.queueDepth = 3
         streamConfig.showsCursor = true
-        streamConfig.captureResolution = .automatic
+        if #available(macOS 14.0, *) {
+            streamConfig.captureResolution = .automatic
+        }
         
         stream = SCStream(filter: filter, configuration: streamConfig, delegate: nil)
         

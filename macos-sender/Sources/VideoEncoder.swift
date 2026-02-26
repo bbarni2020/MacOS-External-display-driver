@@ -78,12 +78,6 @@ class VideoEncoder {
             value: kCFBooleanFalse
         )
         
-        VTSessionSetProperty(
-            session,
-            key: kVTCompressionPropertyKey_EnableLowLatencyMode,
-            value: kCFBooleanTrue
-        )
-        
         VTCompressionSessionPrepareToEncodeFrames(session)
         
         self.compressionSession = session
@@ -143,7 +137,7 @@ class VideoEncoder {
             var ppsPointer: UnsafePointer<UInt8>?
             var ppsSize: Int = 0
             var count: Int = 0
-            var headerLength: Int = 4
+            var headerLength: Int32 = 4
 
             let spsStatus = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
                 formatDesc,
@@ -164,7 +158,7 @@ class VideoEncoder {
             )
 
             if spsStatus == noErr, ppsStatus == noErr, let sps = spsPointer, let pps = ppsPointer {
-                nalUnitHeaderLength = max(1, min(4, headerLength))
+                nalUnitHeaderLength = max(1, min(4, Int(headerLength)))
                 var header: [UInt8] = [0, 0, 0, 1]
                 var data = Data(header)
                 data.append(Data(bytes: sps, count: spsSize))

@@ -1,6 +1,12 @@
 import Foundation
 import AppKit
 
+extension NSScreen {
+    var displayID: CGDirectDisplayID {
+        return deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
+    }
+}
+
 class DisplayManager {
     static let shared = DisplayManager()
     
@@ -62,13 +68,13 @@ class DisplayManager {
     
     private func getDisplayModel(_ displayID: UInt32) -> String? {
         var size: UInt32 = 0
-        let keys = [kDisplayProductNameKey]
+        let keys = ["DisplayProductName"]
         
-        guard let info = IODisplayCreateInfoDictionary(displayID, IOOptionBits(kIODisplayOnlyPreferredName)) as? [String: Any] else {
+        guard let info = IODisplayCreateInfoDictionary(displayID, IOOptionBits(kIODisplayOnlyPreferredName))?.takeRetainedValue() as? [String: Any] else {
             return nil
         }
         
-        if let names = info[kDisplayProductNameKey as String] as? [String: String],
+        if let names = info["DisplayProductName"] as? [String: String],
            let name = names.values.first {
             return name
         }
@@ -80,11 +86,11 @@ class DisplayManager {
         var builtIn: UInt32 = 0
         let options = IOOptionBits(kIODisplayOnlyPreferredName)
         
-        guard let dict = IODisplayCreateInfoDictionary(displayID, options) as? [String: Any] else {
+        guard let dict = IODisplayCreateInfoDictionary(displayID, options)?.takeRetainedValue() as? [String: Any] else {
             return false
         }
         
-        if let builtInValue = dict[kDisplayBuiltInKey] as? NSNumber {
+        if let builtInValue = dict["DisplayBuiltIn"] as? NSNumber {
             return builtInValue.boolValue
         }
         

@@ -11,6 +11,7 @@ class ConfigurationManager {
         static let displayIndex = "DeskExtend.selectedDisplayIndex"
         static let connectionMode = "DeskExtend.connectionMode"
         static let networkHost = "DeskExtend.networkHost"
+        static let manualEthernetTargetEnabled = "DeskExtend.manualEthernetTargetEnabled"
         static let usbDevice = "DeskExtend.usbDevice"
         static let resolution = "DeskExtend.resolution"
         static let fps = "DeskExtend.fps"
@@ -43,6 +44,15 @@ class ConfigurationManager {
         }
         set {
             defaults.set(newValue, forKey: Keys.networkHost)
+        }
+    }
+
+    var manualEthernetTargetEnabled: Bool {
+        get {
+            defaults.bool(forKey: Keys.manualEthernetTargetEnabled)
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.manualEthernetTargetEnabled)
         }
     }
     
@@ -99,6 +109,7 @@ class ConfigurationManager {
         defaults.removeObject(forKey: Keys.displayIndex)
         defaults.removeObject(forKey: Keys.connectionMode)
         defaults.removeObject(forKey: Keys.networkHost)
+        defaults.removeObject(forKey: Keys.manualEthernetTargetEnabled)
         defaults.removeObject(forKey: Keys.usbDevice)
         defaults.removeObject(forKey: Keys.resolution)
         defaults.removeObject(forKey: Keys.fps)

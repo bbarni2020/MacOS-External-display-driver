@@ -47,7 +47,7 @@ class NetworkTransport {
             return
         }
 
-        let connectionHost = resolvedHost(for: trimmed, wiredOnly: wiredOnly, preferredInterfaceName: preferredInterfaceName)
+        let connectionHost = resolvedHost(for: trimmed, wiredOnly: wiredOnly, preferredInterfaceName: preferredInterfaceName, localBindAddress: localBindAddress)
         targetHost = trimmed
         self.port = port
         wiredEthernetOnly = wiredOnly
@@ -68,7 +68,6 @@ class NetworkTransport {
         params.serviceClass = .responsiveData
         params.preferNoProxies = true
         if wiredOnly {
-            params.requiredInterfaceType = .wiredEthernet
             params.prohibitedInterfaceTypes = [.wifi, .cellular, .loopback]
             params.prohibitExpensivePaths = true
             params.prohibitConstrainedPaths = true
@@ -243,7 +242,7 @@ class NetworkTransport {
         return trimmed
     }
 
-    private func resolvedHost(for host: String, wiredOnly: Bool, preferredInterfaceName: String?) -> String {
+    private func resolvedHost(for host: String, wiredOnly: Bool, preferredInterfaceName: String?, localBindAddress: String?) -> String {
         guard wiredOnly else { return host }
         guard host.lowercased().hasSuffix(".local") else { return host }
         guard let iface = preferredInterfaceName, !iface.isEmpty else { return host }
@@ -252,9 +251,22 @@ class NetworkTransport {
         if addresses.isEmpty {
             return host
         }
+        
+        let isBindAddressV4 = localBindAddress?.contains(".") == true
+        let isBindAddressV6 = localBindAddress?.contains(":") == true
+        
+        if isBindAddressV4, let linkLocalV4 = addresses.first(where: { $0.hasPrefix("169.254.") }) {
+            return linkLocalV4
+        }
+        
+        if isBindAddressV6, let scopedV6 = addresses.first(where: { $0.lowercased().hasPrefix("fe80:") }) {
+            let strippedV6 = scopedV6.split(separator: "%").first.map(String.init) ?? scopedV6
+            return "\(strippedV6)%\(iface)"
+        }
 
         if let scopedV6 = addresses.first(where: { $0.lowercased().hasPrefix("fe80:") }) {
-            return "\(scopedV6)%\(iface)"
+            let strippedV6 = scopedV6.split(separator: "%").first.map(String.init) ?? scopedV6
+            return "\(strippedV6)%\(iface)"
         }
         if let linkLocalV4 = addresses.first(where: { $0.hasPrefix("169.254.") }) {
             return linkLocalV4

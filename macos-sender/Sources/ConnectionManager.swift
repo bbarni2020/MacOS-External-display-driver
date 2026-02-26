@@ -11,6 +11,7 @@ class ConnectionManager: ObservableObject {
     private var displayStarted = false
     private var targetDisplay: DisplayInfo?
     private var displayConfig: DisplayConfig?
+    private let automaticEthernetHost = "deskextend.local"
     
     func connect(mode: String) {
         disconnect()
@@ -49,12 +50,12 @@ class ConnectionManager: ObservableObject {
             transport?.connectNetwork(host: host)
             updateDiagnostic("Connecting via Network: \(host)")
         case "ethernet":
-            let host = ConfigurationManager.shared.networkHost
+            let host = resolvedEthernetHost()
             transport?.connectEthernet(host: host)
             updateDiagnostic("Connecting via Ethernet: \(host)")
         case "hybrid":
             let usbPath = ConfigurationManager.shared.usbDevice
-            let host = ConfigurationManager.shared.networkHost
+            let host = resolvedEthernetHost()
             transport?.connectHybrid(usbPath: usbPath, ethernetHost: host)
             updateDiagnostic("Connecting in hybrid mode - USB + Ethernet")
         default:
@@ -64,6 +65,16 @@ class ConnectionManager: ObservableObject {
         if !displayStarted {
             startDisplay()
         }
+    }
+
+    private func resolvedEthernetHost() -> String {
+        if ConfigurationManager.shared.manualEthernetTargetEnabled {
+            let host = ConfigurationManager.shared.networkHost.trimmingCharacters(in: .whitespaces)
+            if !host.isEmpty {
+                return host
+            }
+        }
+        return automaticEthernetHost
     }
     
     private func handleConnectionStatus(connected: Bool, address: String) {

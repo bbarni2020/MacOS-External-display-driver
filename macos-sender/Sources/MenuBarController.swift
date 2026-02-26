@@ -78,7 +78,7 @@ class MenuBarController: NSObject {
         if let popover = popover {
             if popover.isShown {
                 popover.performClose(nil)
-            } else {56
+            } else {
                 popover.contentSize = NSSize(width: 380, height: 620)
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
@@ -86,12 +86,3 @@ class MenuBarController: NSObject {
     }
 }
 
-struct ConnectionStats {
-    var bitrate: Double = 0.0
-    var fps: Int = 0
-    var resolution: String = "1920×1080"
-    var piAddress: String = "Not connected"
-    var encodedFrames: Int = 0
-    var droppedFrames: Int = 0
-    var uptime: TimeInterval = 0
-}

@@ -50,7 +50,6 @@ class NetworkTransport {
         parameters.preferNoProxies = true
         parameters.serviceClass = .responsiveData
         if wiredOnly {
-            parameters.requiredInterfaceType = .wiredEthernet
             parameters.prohibitedInterfaceTypes = [.wifi, .cellular, .loopback]
             parameters.prohibitExpensivePaths = true
             parameters.prohibitConstrainedPaths = true
