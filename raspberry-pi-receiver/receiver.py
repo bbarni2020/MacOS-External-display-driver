@@ -15,6 +15,19 @@ logger = logging.getLogger(__name__)
 receiver = None
 
 
+def configure_logging(level_name):
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    logging.getLogger().setLevel(level)
+    logger.setLevel(level)
+
+
+def available_interfaces():
+    try:
+        return sorted([name for name in os.listdir("/sys/class/net") if name != "lo"])
+    except Exception:
+        return []
+
+
 def signal_handler(sig, frame):
     if receiver:
         receiver.stop()
@@ -32,7 +45,9 @@ def build_parser():
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (network/ethernet/hybrid/all mode)")
     parser.add_argument("--port", type=int, default=5900, help="TCP port (network/ethernet/hybrid/all mode)")
     parser.add_argument("--usb-device", help="USB serial device path (use /dev/ttyGS0 for Pi gadget mode)")
+    parser.add_argument("--eth-interface", help="Force Ethernet interface name for ethernet/hybrid mode (e.g. eth0)")
     parser.add_argument("--name", help="Device name for identification (default: RaspberryPi)")
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO", help="Logging verbosity")
     parser.add_argument("--install", action="store_true", help="Install system and Python dependencies")
     parser.add_argument("--setup-usb", action="store_true", help="Setup USB gadget mode (requires root)")
     return parser
@@ -79,6 +94,7 @@ def pick_usb_device(mode, usb_device):
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    configure_logging(args.log_level)
 
     if args.install:
         install_dependencies()
@@ -97,6 +113,14 @@ def main():
     usb_device = pick_usb_device(args.mode, args.usb_device)
     device_name = args.name or os.environ.get("DESKEXTEND_NAME", "RaspberryPi")
 
+    if args.eth_interface:
+        interfaces = available_interfaces()
+        if interfaces and args.eth_interface not in interfaces:
+            logger.error("Interface '%s' not found. Available: %s", args.eth_interface, ", ".join(interfaces))
+            return 2
+        os.environ["DESKEXTEND_ETH_INTERFACE"] = args.eth_interface
+        logger.info("Forced Ethernet interface: %s", args.eth_interface)
+
     global receiver
     receiver = VideoReceiver(
         mode=args.mode,
@@ -110,6 +134,12 @@ def main():
     if args.mode in ["network", "ethernet", "hybrid", "all"]:
         label = "Ethernet" if args.mode == "ethernet" else "Network"
         logger.info(f"  {label}: {args.host}:{args.port}")
+        if args.mode in ["network", "ethernet"]:
+            allowed = receiver.get_mode_interfaces(args.mode)
+            if allowed:
+                logger.info("  Allowed interfaces: %s", ", ".join(allowed))
+            else:
+                logger.warning("  No explicit interfaces detected; default routing rules apply")
     if args.mode in ["usb", "hybrid", "all"]:
         logger.info(f"  USB device: {usb_device or 'auto-detect'}")
 

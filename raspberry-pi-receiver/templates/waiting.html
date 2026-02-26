@@ -99,6 +99,18 @@
             letter-spacing: 1px;
             color: #d0d0d0;
         }
+
+        .receiver-ip-watermark {
+            position: fixed;
+            right: 1.2em;
+            bottom: 1.2em;
+            font-size: 0.95em;
+            color: #d0d0d0;
+            opacity: 0.5;
+            letter-spacing: 0.02em;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -116,5 +128,6 @@
             <div class="connection-address">{{IP_ADDRESS}}:{{PORT}}</div>
         </div>
     </div>
+    <div class="receiver-ip-watermark">{{ receiver_ips_text }}</div>
 </body>
 </html>

@@ -229,6 +229,52 @@ class VideoReceiver:
             self.display_check_thread = threading.Thread(target=self.display_monitor_loop, daemon=True)
             self.display_check_thread.start()
 
+    def get_receiver_ip_entries(self):
+        entries = []
+        seen = set()
+
+        if psutil:
+            try:
+                for iface, iface_addrs in psutil.net_if_addrs().items():
+                    if iface == "lo":
+                        continue
+
+                    if self._is_wired_interface(iface):
+                        iface_type = "Ethernet"
+                    elif self._is_wifi_interface(iface):
+                        iface_type = "Wi-Fi"
+                    else:
+                        continue
+
+                    for addr in iface_addrs:
+                        if getattr(addr, "family", None) != socket.AF_INET:
+                            continue
+
+                        ip = (addr.address or "").strip()
+                        if not ip or ip.startswith("127."):
+                            continue
+
+                        key = (iface, ip)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        entries.append({"type": iface_type, "iface": iface, "ip": ip})
+            except Exception:
+                pass
+
+        def sort_key(item):
+            type_rank = 0 if item["type"] == "Ethernet" else 1
+            return (type_rank, item["iface"], item["ip"])
+
+        entries.sort(key=sort_key)
+        return entries
+
+    def get_receiver_ips_text(self):
+        entries = self.get_receiver_ip_entries()
+        if not entries:
+            return "IP unavailable"
+        return " | ".join([f"{item['type']} {item['ip']}" for item in entries])
+
     def start_web_server(self):
         if not Flask or not psutil:
             print("Flask or psutil not available, skipping web server start")
@@ -246,8 +292,23 @@ class VideoReceiver:
         @self.app.route("/")
         def dashboard():
             if display_mode == "waiting":
-                return render_template("waiting.html")
-            return render_template("dashboard.html")
+                ip_entries = self.get_receiver_ip_entries()
+                primary = ip_entries[0]["ip"] if ip_entries else self.host
+                return render_template(
+                    "waiting.html",
+                    IP_ADDRESS=primary,
+                    PORT=self.port,
+                    receiver_ips_text=self.get_receiver_ips_text()
+                )
+            return render_template("dashboard.html", receiver_ips_text=self.get_receiver_ips_text())
+
+        @self.app.route("/receiver-ips")
+        def receiver_ips():
+            entries = self.get_receiver_ip_entries()
+            return {
+                "items": entries,
+                "text": self.get_receiver_ips_text()
+            }
 
         @self.app.route("/stats")
         def stats():

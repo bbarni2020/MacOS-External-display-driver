@@ -172,6 +172,18 @@
             pointer-events: auto;
             transform: translateX(-50%) translateY(0);
         }
+        .receiver-ip-watermark {
+            position: fixed;
+            right: 1.2em;
+            bottom: 1.2em;
+            font-size: 0.95em;
+            color: #d0d0d0;
+            opacity: 0.5;
+            z-index: 30;
+            letter-spacing: 0.02em;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
         .spotify-cover {
             width: 36px;
             height: 36px;
@@ -310,6 +322,7 @@
     </style>
 </head>
 <body>
+    <div id="receiver-ip-watermark" class="receiver-ip-watermark">{{ receiver_ips_text }}</div>
     <div id="startup-overlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:9999;pointer-events:none;display:none;align-items:center;justify-content:center;flex-direction:column;background:#0c140b;color:#fff;">
         <div id="startup-logo" style="font-size:8vw;font-weight:900;color:#fff;letter-spacing:0.02em;text-shadow:0 2px 4px rgba(0,0,0,0.12);">
             <span>W</span><span>e</span><span>l</span><span>c</span><span>o</span><span>m</span><span>e</span> <span>b</span><span>a</span><span>c</span><span>k</span>
@@ -574,18 +587,31 @@
                 checkInternet();
             }
         }
+        function updateReceiverIps() {
+            fetch('/receiver-ips')
+                .then(r => r.json())
+                .then(data => {
+                    const node = document.getElementById('receiver-ip-watermark');
+                    if (node && data && data.text) {
+                        node.textContent = data.text;
+                    }
+                })
+                .catch(() => {});
+        }
         updateTime();
         checkDisplayStatus();
         updateStats();
         checkInternet();
         updateWeather();
         updateSpotify();
+        updateReceiverIps();
         setInterval(updateTime, 1000);
         setInterval(checkDisplayStatus, 5000);
         setInterval(updateStatsConditional, 5000);
         setInterval(checkInternetConditional, 10000);
         setInterval(updateWeatherConditional, 1800000);
         setInterval(updateSpotifyConditional, 5000);
+        setInterval(updateReceiverIps, 5000);
     </script>
 </body>
 </html>
