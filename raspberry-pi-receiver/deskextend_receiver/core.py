@@ -957,11 +957,11 @@ class VideoReceiver:
 
     @staticmethod
     def _is_wired_interface(iface):
-        if iface == "lo":
+        if iface == "lo" or iface.startswith("wl"):
             return False
-        if iface.startswith("wl"):
+        if os.path.exists(f"/sys/class/net/{iface}/wireless"):
             return False
-        return iface.startswith("eth") or iface.startswith("en") or iface.startswith("enx")
+        return True
 
     def get_mode_interfaces(self, mode_name):
         interfaces = []
@@ -1040,7 +1040,7 @@ class VideoReceiver:
         except Exception:
             return None
 
-        priority = ("eth", "enx", "en")
+        priority = ("eth", "enx", "en", "usb")
         for prefix in priority:
             for iface in candidates:
                 if iface.startswith(prefix):
@@ -1060,17 +1060,6 @@ class VideoReceiver:
                     sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
                 except Exception:
                     pass
-            if ethernet_only and self.ethernet_interface and hasattr(socket, "SO_BINDTODEVICE"):
-                try:
-                    sock.setsockopt(
-                        socket.SOL_SOCKET,
-                        socket.SO_BINDTODEVICE,
-                        self.ethernet_interface.encode() + b"\0"
-                    )
-                except PermissionError:
-                    logger.warning("SO_BINDTODEVICE not permitted; continuing without interface bind")
-                except Exception as bind_error:
-                    logger.warning("SO_BINDTODEVICE failed (%s); continuing without interface bind", bind_error)
             return sock
 
         candidates = []
