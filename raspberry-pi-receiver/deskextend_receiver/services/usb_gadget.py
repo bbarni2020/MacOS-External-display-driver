@@ -5,123 +5,132 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+CONFIGFS_MOUNT = "/sys/kernel/config"
+GADGET_NAME = "deskextend"
+GADGET_DIR = f"{CONFIGFS_MOUNT}/usb_gadget/{GADGET_NAME}"
+CONFIG_DIR = f"{GADGET_DIR}/configs/c.1"
+FUNC_DIR = f"{GADGET_DIR}/functions/acm.usb0"
+STRINGS_DIR = f"{GADGET_DIR}/strings/0x409"
+CONFIG_STRINGS_DIR = f"{CONFIG_DIR}/strings/0x409"
+
+
+def _write(path, value):
+    with open(path, "w") as file_handle:
+        file_handle.write(f"{value}\n")
+
+
+def _ensure_configfs():
+    if os.path.exists(CONFIGFS_MOUNT):
+        return True
+    subprocess.run(["modprobe", "configfs"], check=False)
+    subprocess.run(["mount", "-t", "configfs", "none", CONFIGFS_MOUNT], check=False)
+    return os.path.exists(CONFIGFS_MOUNT)
+
+
+def _cleanup_existing_gadget():
+    if not os.path.isdir(GADGET_DIR):
+        return
+    try:
+        udc_path = os.path.join(GADGET_DIR, "UDC")
+        if os.path.exists(udc_path):
+            _write(udc_path, "")
+        time.sleep(0.2)
+
+        symlink_path = os.path.join(CONFIG_DIR, "acm.usb0")
+        if os.path.islink(symlink_path):
+            os.unlink(symlink_path)
+
+        for path in [CONFIG_STRINGS_DIR, FUNC_DIR, CONFIG_DIR, STRINGS_DIR, GADGET_DIR]:
+            if os.path.isdir(path):
+                try:
+                    os.rmdir(path)
+                except OSError:
+                    subprocess.run(["rm", "-rf", path], check=False)
+    except Exception as error:
+        logger.warning("USB gadget cleanup warning: %s", error)
+
+
+def _pick_udc(timeout=10.0):
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        try:
+            devices = sorted(os.listdir("/sys/class/udc"))
+            if devices:
+                return devices[0]
+        except Exception:
+            pass
+        time.sleep(0.2)
+    return None
+
+
+def _wait_for_gadget_tty(timeout=8.0):
+    end_time = time.time() + timeout
+    while time.time() < end_time:
+        if os.path.exists("/dev/ttyGS0"):
+            return True
+        time.sleep(0.2)
+    return False
+
 
 def setup_usb_gadget():
     if os.geteuid() != 0:
         print("USB gadget setup requires root privileges. Run with: sudo python3 receiver.py --setup-usb")
         return False
 
-    configfs_mount = "/sys/kernel/config"
-
-    if not os.path.exists(configfs_mount):
-        print("ConfigFS not available. Attempting to mount...")
-        try:
-            subprocess.run(["modprobe", "configfs"], check=False)
-            subprocess.run(["mount", "-t", "configfs", "none", configfs_mount], check=False)
-        except Exception as e:
-            print(f"Error: {e}")
-
-    if not os.path.exists(configfs_mount):
-        print("Error: ConfigFS not available and cannot be mounted.")
-        print("Your kernel may not have USB gadget support enabled.")
-        print("This requires: CONFIG_USB_GADGET=y and CONFIG_CONFIGFS_FS=y in kernel config")
+    if not _ensure_configfs():
+        logger.error("ConfigFS is not available. Ensure CONFIG_USB_GADGET and CONFIG_CONFIGFS_FS are enabled.")
         return False
 
     try:
         subprocess.run(["modprobe", "libcomposite"], check=False)
+        subprocess.run(["modprobe", "dwc2"], check=False)
         subprocess.run(["modprobe", "usb_f_acm"], check=False)
     except Exception:
         pass
 
-    gadget_dir = "/sys/kernel/config/usb_gadget/deskextend"
-
-    if os.path.isdir(gadget_dir):
-        logger.info("Cleaning up existing gadget...")
-        try:
-            udc_file = os.path.join(gadget_dir, "UDC")
-            if os.path.exists(udc_file):
-                with open(udc_file, "w") as f:
-                    f.write("")
-            time.sleep(0.5)
-
-            config_dir = os.path.join(gadget_dir, "configs/c.1")
-            if os.path.isdir(config_dir):
-                acm_symlink = os.path.join(config_dir, "acm.usb0")
-                if os.path.islink(acm_symlink):
-                    os.unlink(acm_symlink)
-
-                strings_dir = os.path.join(config_dir, "strings/0x409")
-                if os.path.isdir(strings_dir):
-                    subprocess.run(["rm", "-rf", strings_dir], check=False)
-
-                subprocess.run(["rmdir", config_dir], check=False)
-
-            func_dir = os.path.join(gadget_dir, "functions/acm.usb0")
-            if os.path.isdir(func_dir):
-                subprocess.run(["rmdir", func_dir], check=False)
-
-            strings_dir = os.path.join(gadget_dir, "strings/0x409")
-            if os.path.isdir(strings_dir):
-                subprocess.run(["rm", "-rf", strings_dir], check=False)
-
-            subprocess.run(["rmdir", gadget_dir], check=False)
-
-            time.sleep(0.5)
-        except Exception as e:
-            logger.warning(f"Cleanup warning: {e}")
+    _cleanup_existing_gadget()
 
     try:
-        os.makedirs(gadget_dir, exist_ok=True)
+        os.makedirs(GADGET_DIR, exist_ok=True)
 
-        with open(os.path.join(gadget_dir, "idVendor"), "w") as f:
-            f.write("0x1d6b\n")
-        with open(os.path.join(gadget_dir, "idProduct"), "w") as f:
-            f.write("0x0108\n")
+        _write(os.path.join(GADGET_DIR, "idVendor"), "0x0525")
+        _write(os.path.join(GADGET_DIR, "idProduct"), "0xa4a7")
+        _write(os.path.join(GADGET_DIR, "bcdDevice"), "0x0100")
+        _write(os.path.join(GADGET_DIR, "bcdUSB"), "0x0200")
+        _write(os.path.join(GADGET_DIR, "bDeviceClass"), "0x02")
+        _write(os.path.join(GADGET_DIR, "bDeviceSubClass"), "0x00")
+        _write(os.path.join(GADGET_DIR, "bDeviceProtocol"), "0x00")
 
-        strings_dir = os.path.join(gadget_dir, "strings/0x409")
-        os.makedirs(strings_dir, exist_ok=True)
-        with open(os.path.join(strings_dir, "manufacturer"), "w") as f:
-            f.write("DeskExtend\n")
-        with open(os.path.join(strings_dir, "product"), "w") as f:
-            f.write("RaspberryPi\n")
+        os.makedirs(STRINGS_DIR, exist_ok=True)
+        _write(os.path.join(STRINGS_DIR, "manufacturer"), "DeskExtend")
+        _write(os.path.join(STRINGS_DIR, "product"), "DeskExtend Receiver")
 
         device_serial = os.environ.get("DESKEXTEND_NAME", "RaspberryPi")
-        with open(os.path.join(strings_dir, "serialnumber"), "w") as f:
-            f.write(f"DeskExtend-{device_serial}\n")
+        _write(os.path.join(STRINGS_DIR, "serialnumber"), f"DeskExtend-{device_serial}")
 
-        config_dir = os.path.join(gadget_dir, "configs/c.1")
-        os.makedirs(config_dir, exist_ok=True)
-        with open(os.path.join(config_dir, "MaxPower"), "w") as f:
-            f.write("500\n")
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        _write(os.path.join(CONFIG_DIR, "MaxPower"), "250")
 
-        func_dir = os.path.join(gadget_dir, "functions/acm.usb0")
-        os.makedirs(func_dir, exist_ok=True)
+        os.makedirs(CONFIG_STRINGS_DIR, exist_ok=True)
+        _write(os.path.join(CONFIG_STRINGS_DIR, "configuration"), "CDC ACM")
 
-        config_strings = os.path.join(config_dir, "strings/0x409")
-        os.makedirs(config_strings, exist_ok=True)
-        with open(os.path.join(config_strings, "configuration"), "w") as f:
-            f.write("ACM\n")
+        os.makedirs(FUNC_DIR, exist_ok=True)
 
-        symlink_target = os.path.join(config_dir, "acm.usb0")
-        if not os.path.exists(symlink_target):
-            os.symlink(func_dir, symlink_target)
+        function_link = os.path.join(CONFIG_DIR, "acm.usb0")
+        if not os.path.exists(function_link):
+            os.symlink(FUNC_DIR, function_link)
 
-        try:
-            devices = os.listdir("/sys/class/udc")
-            if not devices:
-                logger.error("No USB device controller found.")
-                return False
-            udc_device = devices[0]
-        except Exception:
-            logger.error("Cannot find USB device controller.")
+        udc_device = _pick_udc(timeout=10.0)
+        if not udc_device:
+            logger.error("Cannot find USB device controller in /sys/class/udc")
             return False
 
-        with open(os.path.join(gadget_dir, "UDC"), "w") as f:
-            f.write(f"{udc_device}\n")
+        _write(os.path.join(GADGET_DIR, "UDC"), udc_device)
+        logger.info("USB gadget configured and bound to UDC: %s", udc_device)
 
-        logger.info(f"USB gadget configured: {udc_device}")
-
-        time.sleep(1)
+        if not _wait_for_gadget_tty(timeout=8.0):
+            logger.error("USB gadget configured but /dev/ttyGS0 did not appear")
+            return False
 
         if os.path.exists("/dev/ttyGS0"):
             subprocess.run(["stty", "-F", "/dev/ttyGS0", "115200"], check=False)
@@ -129,9 +138,9 @@ def setup_usb_gadget():
 
         return True
 
-    except PermissionError as e:
-        logger.error(f"Permission error: {e}")
+    except PermissionError as error:
+        logger.error("Permission error: %s", error)
         return False
-    except Exception as e:
-        logger.error(f"Error setting up USB gadget: {e}")
+    except Exception as error:
+        logger.error("Error setting up USB gadget: %s", error)
         return False

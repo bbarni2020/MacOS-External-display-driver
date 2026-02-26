@@ -60,7 +60,7 @@ final class USBTransport {
         }
 
         cfmakeraw(&options)
-        options.c_cflag |= (CLOCAL | CREAD)
+        options.c_cflag |= tcflag_t(CLOCAL | CREAD)
         options.c_cflag &= ~tcflag_t(PARENB)
         options.c_cflag &= ~tcflag_t(CSTOPB)
         options.c_cflag &= ~tcflag_t(CSIZE)
@@ -68,8 +68,6 @@ final class USBTransport {
         options.c_iflag = 0
         options.c_oflag = 0
         options.c_lflag = 0
-        options.c_cc.16 = 0
-        options.c_cc.17 = 1
 
         if cfsetispeed(&options, speed_t(B115200)) != 0 {
             return false

@@ -3,19 +3,29 @@ import os
 
 
 def detect_all_devices():
-    patterns = [
+    ordered = []
+    seen = set()
+
+    preferred = ["/dev/ttyGS0"]
+    for path in preferred:
+        if os.path.exists(path) and path not in seen:
+            seen.add(path)
+            ordered.append(path)
+
+    primary_patterns = [
+        "/dev/serial/by-id/*",
         "/dev/ttyGS*",
-        "/dev/ttyUSB*",
         "/dev/ttyACM*",
-        "/dev/cu.usbmodem*",
-        "/dev/tty.*",
-        "/dev/cu.*",
-        "/dev/serial/by-id/*"
+        "/dev/ttyUSB*"
     ]
-    devices = []
-    for pattern in patterns:
-        devices.extend(glob.glob(pattern))
-    return sorted(set(devices))
+
+    for pattern in primary_patterns:
+        for path in sorted(glob.glob(pattern)):
+            if path not in seen:
+                seen.add(path)
+                ordered.append(path)
+
+    return ordered
 
 
 def detect_usb_device():

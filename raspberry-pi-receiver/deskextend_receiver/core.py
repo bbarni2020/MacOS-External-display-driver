@@ -50,7 +50,8 @@ class VideoReceiver:
         if self.mode in ["usb", "hybrid", "all"]:
             if os.geteuid() == 0:
                 logger.info("Setting up USB gadget...")
-                setup_usb_gadget()
+                if not setup_usb_gadget():
+                    logger.error("USB gadget setup failed; receiver may not appear as USB accessory")
             else:
                 logger.warning("USB mode requires root. USB may not be available.")
 
@@ -237,23 +238,6 @@ class VideoReceiver:
         @self.app.route("/display-status")
         def display_status():
             return {"connected": self.display_connected}
-
-        @self.app.route("/usb-accessories")
-        def usb_accessories():
-            devices, selected = self.refresh_usb_devices()
-            connected = bool(self.serial_conn and getattr(self.serial_conn, "is_open", False))
-            return {
-                "connected": connected,
-                "selected": selected,
-                "devices": [
-                    {
-                        "path": path,
-                        "name": os.path.basename(path),
-                        "type": "usb-accessory"
-                    }
-                    for path in devices
-                ]
-            }
 
         @self.app.route("/weather")
         def weather():
