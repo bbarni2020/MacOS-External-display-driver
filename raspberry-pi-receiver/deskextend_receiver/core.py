@@ -84,6 +84,7 @@ class VideoReceiver:
         self.transport_lock = threading.Lock()
         self.active_transport = None
         self.ethernet_interface = self.detect_ethernet_interface()
+        self.max_frame_size = int(os.environ.get("DESKEXTEND_MAX_FRAME_SIZE", str(50 * 1024 * 1024)))
         self.refresh_usb_devices()
 
     def try_claim_transport(self, transport_name):
@@ -982,8 +983,13 @@ class VideoReceiver:
         if mode_name not in ("network", "ethernet"):
             return True
 
+        strict = mode_name == "ethernet"
+
         allowed_interfaces = self.get_mode_interfaces(mode_name)
         if not allowed_interfaces:
+            if strict:
+                logger.warning("No allowed Ethernet interfaces detected; rejecting client %s", client_ip)
+                return False
             return True
 
         try:
@@ -994,6 +1000,9 @@ class VideoReceiver:
                 timeout=1.0
             )
             if result.returncode != 0:
+                if strict:
+                    logger.warning("Route lookup failed for Ethernet client %s", client_ip)
+                    return False
                 return True
 
             parts = result.stdout.strip().split()
@@ -1003,9 +1012,12 @@ class VideoReceiver:
                     dev = parts[index + 1]
                     return dev in allowed_interfaces
         except Exception:
+            if strict:
+                logger.warning("Could not validate Ethernet client route for %s", client_ip)
+                return False
             return True
 
-        return True
+        return not strict
 
     def detect_ethernet_interface(self):
         preferred = os.environ.get("DESKEXTEND_ETH_INTERFACE", "").strip()
@@ -1036,32 +1048,65 @@ class VideoReceiver:
         return candidates[0] if candidates else None
 
     def bind_socket_for_mode(self, ethernet_only=False):
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
-            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x10)
-
+        def make_socket(family):
+            sock = socket.socket(family, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            if family == socket.AF_INET:
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x10)
+            if family == socket.AF_INET6:
+                try:
+                    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                except Exception:
+                    pass
             if ethernet_only and self.ethernet_interface and hasattr(socket, "SO_BINDTODEVICE"):
-                self.sock.setsockopt(
-                    socket.SOL_SOCKET,
-                    socket.SO_BINDTODEVICE,
-                    self.ethernet_interface.encode() + b"\0"
-                )
+                try:
+                    sock.setsockopt(
+                        socket.SOL_SOCKET,
+                        socket.SO_BINDTODEVICE,
+                        self.ethernet_interface.encode() + b"\0"
+                    )
+                except PermissionError:
+                    logger.warning("SO_BINDTODEVICE not permitted; continuing without interface bind")
+                except Exception as bind_error:
+                    logger.warning("SO_BINDTODEVICE failed (%s); continuing without interface bind", bind_error)
+            return sock
 
-            self.sock.bind((self.host, self.port))
-            self.sock.listen(1)
-            self.sock.settimeout(5.0)
-            if ethernet_only:
-                iface = self.ethernet_interface or "auto"
-                logger.info(f"[{self.device_name}] Listening on Ethernet {iface} {self.host}:{self.port}")
-            else:
-                logger.info(f"[{self.device_name}] Listening on {self.host}:{self.port}")
-            return True
-        except Exception as e:
-            logger.error(f"Socket bind failed: {e}")
-            return False
+        candidates = []
+        host = (self.host or "0.0.0.0").strip()
+        if host in ("", "0.0.0.0"):
+            candidates.append((socket.AF_INET6, ("::", self.port, 0, 0)))
+            candidates.append((socket.AF_INET, ("0.0.0.0", self.port)))
+        elif ":" in host:
+            candidates.append((socket.AF_INET6, (host, self.port, 0, 0)))
+        else:
+            candidates.append((socket.AF_INET, (host, self.port)))
+
+        last_error = None
+        for family, bind_target in candidates:
+            try:
+                self.sock = make_socket(family)
+                self.sock.bind(bind_target)
+                self.sock.listen(5)
+                self.sock.settimeout(5.0)
+                if ethernet_only:
+                    iface = self.ethernet_interface or "auto"
+                    logger.info(f"[{self.device_name}] Listening on Ethernet {iface} {host}:{self.port}")
+                else:
+                    logger.info(f"[{self.device_name}] Listening on {host}:{self.port}")
+                return True
+            except Exception as e:
+                last_error = e
+                try:
+                    if self.sock:
+                        self.sock.close()
+                except Exception:
+                    pass
+                self.sock = None
+
+        logger.error(f"Socket bind failed: {last_error}")
+        return False
 
     def open_usb(self):
         if not self.usb_device:
@@ -1117,9 +1162,14 @@ class VideoReceiver:
         try:
             if serial and hasattr(serial, "Serial") and isinstance(conn, serial.Serial):
                 return conn.read(min(chunk_size, 4096)) if conn.in_waiting else b""
-            return conn.recv(chunk_size)
+            chunk = conn.recv(chunk_size)
+            if not chunk:
+                return None
+            return chunk
         except socket.timeout:
             return b""
+        except ConnectionResetError:
+            return None
         except Exception as e:
             if serial and hasattr(serial, "SerialException") and isinstance(e, serial.SerialException):
                 return None
@@ -1141,6 +1191,7 @@ class VideoReceiver:
                 try:
                     chunk = self.read_from_connection(conn)
                     if chunk is None:
+                        logger.info("Connection closed by peer.")
                         break
                     if not chunk:
                         if is_serial:
@@ -1159,10 +1210,9 @@ class VideoReceiver:
                         frame_size = struct.unpack(">I", buffer[:4]
                         )[0]
 
-                        if frame_size > 10485760:
-                            logger.warning(f"Invalid frame size: {frame_size}")
-                            buffer = buffer[1:]
-                            continue
+                        if frame_size > self.max_frame_size:
+                            logger.warning(f"Invalid frame size: {frame_size} - Connection considered corrupt, dropping.")
+                            return False
 
                         if len(buffer) < 4 + frame_size:
                             break
@@ -1209,10 +1259,6 @@ class VideoReceiver:
 
         while self.running:
             try:
-                if not self.display_connected:
-                    time.sleep(1)
-                    continue
-
                 if self.is_transport_busy_for("USB"):
                     time.sleep(0.5)
                     continue
@@ -1313,10 +1359,6 @@ class VideoReceiver:
 
         while self.running:
             try:
-                if not self.display_connected:
-                    time.sleep(1)
-                    continue
-
                 if self.is_transport_busy_for("USB"):
                     time.sleep(0.5)
                     continue
@@ -1509,10 +1551,6 @@ class VideoReceiver:
 
         while self.running:
             try:
-                if not self.display_connected:
-                    time.sleep(1)
-                    continue
-
                 if self.is_transport_busy_for("Network"):
                     time.sleep(0.5)
                     continue
@@ -1539,6 +1577,7 @@ class VideoReceiver:
 
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+                    conn.settimeout(5.0)
 
                     if not self.start_decoder():
                         conn.close()
@@ -1585,10 +1624,6 @@ class VideoReceiver:
 
         while self.running:
             try:
-                if not self.display_connected:
-                    time.sleep(1)
-                    continue
-
                 if self.is_transport_busy_for("Ethernet"):
                     time.sleep(0.5)
                     continue
@@ -1615,6 +1650,7 @@ class VideoReceiver:
 
                     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+                    conn.settimeout(5.0)
 
                     if not self.start_decoder():
                         conn.close()

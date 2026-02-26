@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Darwin
 
 final class AppManager: ObservableObject {
     @Published var isConnected = false
@@ -27,6 +28,10 @@ final class AppManager: ObservableObject {
     @Published var usbDevice: String = ConfigurationManager.shared.usbDevice {
         didSet { ConfigurationManager.shared.usbDevice = usbDevice }
     }
+    @Published var selectedEthernetInterface: String = ConfigurationManager.shared.selectedEthernetInterface {
+        didSet { ConfigurationManager.shared.selectedEthernetInterface = selectedEthernetInterface }
+    }
+    @Published var ethernetInterfaces: [EthernetInterface] = []
     @Published var usbDevices: [String] = []
     @Published var usbDeviceNames: [String] = []
     private var usbRefreshTimer: Timer?
@@ -39,6 +44,19 @@ final class AppManager: ObservableObject {
         guard let first = usbDevices.first else { return }
         if usbDevice.isEmpty || !usbDevices.contains(usbDevice) {
             usbDevice = first
+        }
+    }
+
+    func refreshEthernetInterfaces() {
+        ethernetInterfaces = EthernetInterfaceDetector.wiredInterfaces()
+
+        if ethernetInterfaces.isEmpty {
+            selectedEthernetInterface = ""
+            return
+        }
+
+        if selectedEthernetInterface.isEmpty || !ethernetInterfaces.contains(where: { $0.name == selectedEthernetInterface }) {
+            selectedEthernetInterface = ethernetInterfaces[0].name
         }
     }
     @Published var virtualDisplayName: String = ConfigurationManager.shared.virtualDisplayName {
@@ -87,6 +105,7 @@ final class AppManager: ObservableObject {
     func start() {
         isRunning = true
         refreshUsbDevices()
+        refreshEthernetInterfaces()
         startUsbDeviceRefreshLoop()
     }
     
@@ -95,10 +114,23 @@ final class AppManager: ObservableObject {
         let host = trimmed.isEmpty ? networkHost : trimmed
         let targetPort = port > 0 ? port : networkPort
 
+        guard (1...65535).contains(targetPort) else {
+            appendLog("Invalid port: \(targetPort). Use 1-65535")
+            return
+        }
+
         if connectionMode == .usb || connectionMode == .hybrid {
             refreshUsbDevices()
             if usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appendLog("No USB device available for connection")
+                return
+            }
+        }
+
+        if connectionMode == .ethernet || connectionMode == .hybrid {
+            refreshEthernetInterfaces()
+            if selectedEthernetInterface.isEmpty {
+                appendLog("No wired Ethernet interface available")
                 return
             }
         }
@@ -110,6 +142,8 @@ final class AppManager: ObservableObject {
             host: host,
             port: targetPort,
             usbDevice: usbDevice,
+            ethernetInterface: selectedEthernetInterface,
+            ethernetBindAddress: EthernetInterfaceDetector.ipv4Address(for: selectedEthernetInterface),
             displayIndex: ConfigurationManager.shared.selectedDisplayIndex,
             config: config
         )
@@ -253,5 +287,72 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         guard indices.contains(index) else { return nil }
         return self[index]
+    }
+}
+
+struct EthernetInterface: Identifiable, Equatable {
+    let name: String
+    let address: String
+
+    var id: String { name }
+    var label: String { "\(name) (\(address))" }
+}
+
+enum EthernetInterfaceDetector {
+    static func wiredInterfaces() -> [EthernetInterface] {
+        var pointer: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&pointer) == 0, let first = pointer else { return [] }
+        defer { freeifaddrs(pointer) }
+
+        var interfacesByName: [String: EthernetInterface] = [:]
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+
+        while let interface = current?.pointee {
+            defer { current = interface.ifa_next }
+
+            guard let addr = interface.ifa_addr else { continue }
+            guard addr.pointee.sa_family == UInt8(AF_INET) else { continue }
+            guard let cName = interface.ifa_name else { continue }
+
+            let name = String(cString: cName)
+            if !isWiredName(name) { continue }
+
+            let flags = Int32(interface.ifa_flags)
+            if (flags & IFF_LOOPBACK) != 0 { continue }
+
+            guard let address = ipv4String(from: addr) else { continue }
+            if interfacesByName[name] == nil {
+                interfacesByName[name] = EthernetInterface(name: name, address: address)
+            }
+        }
+
+        return interfacesByName.values.sorted { $0.name < $1.name }
+    }
+
+    static func ipv4Address(for interfaceName: String) -> String? {
+        guard !interfaceName.isEmpty else { return nil }
+        return wiredInterfaces().first { $0.name == interfaceName }?.address
+    }
+
+    private static func isWiredName(_ name: String) -> Bool {
+        name.hasPrefix("en") || name.hasPrefix("eth")
+    }
+
+    private static func ipv4String(from sockaddrPointer: UnsafeMutablePointer<sockaddr>) -> String? {
+        var address = sockaddrPointer.pointee
+        var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+
+        let result = getnameinfo(
+            &address,
+            socklen_t(address.sa_len),
+            &host,
+            socklen_t(host.count),
+            nil,
+            0,
+            NI_NUMERICHOST
+        )
+
+        guard result == 0 else { return nil }
+        return String(cString: host)
     }
 }

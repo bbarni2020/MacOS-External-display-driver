@@ -23,6 +23,8 @@ struct ConnectionRequest {
     let host: String
     let port: Int
     let usbDevice: String
+    let ethernetInterface: String
+    let ethernetBindAddress: String?
     let displayIndex: Int
     let config: DisplayConfig
 }

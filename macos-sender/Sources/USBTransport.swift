@@ -14,6 +14,10 @@ class USBTransport {
     private var bytesSent: UInt64 = 0
     private var lastStatsTime = Date()
     
+    private let maxInflightFrames = 30
+    private var inflightFrames = 0
+    private let inflightSyncQueue = DispatchQueue(label: "com.virtualdisplay.usb.inflight")
+    
     init(devicePath: String, statusCallback: ((Bool, String) -> Void)? = nil, logCallback: ((String) -> Void)? = nil) {
         self.devicePath = devicePath
         self.statusCallback = statusCallback
@@ -49,7 +53,26 @@ class USBTransport {
             return
         }
         
+        var shouldDrop = false
+        inflightSyncQueue.sync {
+            if inflightFrames >= maxInflightFrames {
+                shouldDrop = true
+            } else {
+                inflightFrames += 1
+            }
+        }
+        
+        if shouldDrop {
+            return
+        }
+        
         queue.async { [weak self] in
+            defer {
+                self?.inflightSyncQueue.sync {
+                    self?.inflightFrames -= 1
+                }
+            }
+            
             do {
                 var packet = data
                 var header = UInt32(data.count).bigEndian

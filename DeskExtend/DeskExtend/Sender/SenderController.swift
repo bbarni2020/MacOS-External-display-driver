@@ -22,9 +22,14 @@ class SenderController {
         }
         
         pendingRequest = request
+
+        guard let validatedPort = UInt16(exactly: request.port), validatedPort > 0 else {
+            appManager?.appendLog("Invalid port: \(request.port). Use 1-65535")
+            return
+        }
         
         let virtualName = ConfigurationManager.shared.virtualDisplayName
-        guard let targetDisplayUnwrapped = DisplayManager.shared.displayNamed(virtualName) else {
+        guard let targetDisplayUnwrapped = waitForDisplay(named: virtualName, timeout: 8.0, pollInterval: 0.2) else {
             appManager?.appendLog("Virtual display '\(virtualName)' not found")
             return
         }
@@ -47,15 +52,26 @@ class SenderController {
             }
             transport.connectUSB(devicePath: request.usbDevice)
         case .network:
-            transport.connectNetwork(host: request.host, port: UInt16(request.port))
+            transport.connectNetwork(host: request.host, port: validatedPort, localBindAddress: nil, preferredInterfaceName: nil)
         case .ethernet:
-            transport.connectEthernet(host: request.host, port: UInt16(request.port))
+            transport.connectEthernet(
+                host: request.host,
+                port: validatedPort,
+                localBindAddress: request.ethernetBindAddress,
+                preferredInterfaceName: request.ethernetInterface
+            )
         case .hybrid:
             if request.usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appManager?.appendLog("Hybrid mode selected but no USB device path is configured")
                 return
             }
-            transport.connectHybrid(usbPath: request.usbDevice, ethernetHost: request.host, port: UInt16(request.port))
+            transport.connectHybrid(
+                usbPath: request.usbDevice,
+                ethernetHost: request.host,
+                port: validatedPort,
+                ethernetLocalBindAddress: request.ethernetBindAddress,
+                ethernetInterfaceName: request.ethernetInterface
+            )
         }
         
         let encoder = VideoEncoder(config: request.config) { [weak self] data in
@@ -158,5 +174,26 @@ class SenderController {
     
     private func resolutionString(for config: DisplayConfig) -> String {
         return "\(config.width)×\(config.height)"
+    }
+
+    private func waitForDisplay(named name: String, timeout: TimeInterval, pollInterval: TimeInterval) -> DisplayInfo? {
+        if let display = DisplayManager.shared.displayNamed(name) {
+            return display
+        }
+
+        appManager?.appendLog("Waiting for virtual display '\(name)'...")
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            let stepEnd = Date().addingTimeInterval(pollInterval)
+            RunLoop.current.run(mode: .default, before: stepEnd)
+
+            if let display = DisplayManager.shared.displayNamed(name) {
+                appManager?.appendLog("Virtual display '\(name)' is ready")
+                return display
+            }
+        }
+
+        return nil
     }
 }

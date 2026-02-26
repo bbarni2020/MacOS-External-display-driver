@@ -79,7 +79,7 @@ class HybridTransport {
             logCallback: logCallback
         )
         
-        networkTransport?.connect(to: host, wiredOnly: false)
+        networkTransport?.connect(to: host, wiredOnly: false, wifiOrEthernetOnly: true)
     }
     
     func connectEthernet(host: String) {
@@ -93,7 +93,7 @@ class HybridTransport {
             logCallback: logCallback
         )
 
-        networkTransport?.connect(to: host, wiredOnly: true)
+        networkTransport?.connect(to: host, wiredOnly: true, wifiOrEthernetOnly: true)
     }
 
     func connectHybrid(usbPath: String, ethernetHost: String) {
@@ -119,7 +119,7 @@ class HybridTransport {
         )
         
         usbTransport?.connect()
-        networkTransport?.connect(to: ethernetHost, wiredOnly: true)
+        networkTransport?.connect(to: ethernetHost, wiredOnly: true, wifiOrEthernetOnly: true)
     }
     
     private func updateHybridStatus() {

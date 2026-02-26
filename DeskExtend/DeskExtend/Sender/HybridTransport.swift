@@ -56,19 +56,33 @@ final class HybridTransport {
         usbTransport?.connect()
     }
 
-    func connectNetwork(host: String, port: UInt16) {
+    func connectNetwork(host: String, port: UInt16, localBindAddress: String?, preferredInterfaceName: String?) {
         mode = .network(host: host, port: port)
         networkTransport = NetworkTransport(statusCallback: statusCallback, logCallback: logCallback)
-        networkTransport?.connect(to: host, port: port, wiredOnly: false)
+        networkTransport?.connect(
+            to: host,
+            port: port,
+            wiredOnly: false,
+            wifiOrEthernetOnly: true,
+            localBindAddress: localBindAddress,
+            preferredInterfaceName: preferredInterfaceName
+        )
     }
 
-    func connectEthernet(host: String, port: UInt16) {
+    func connectEthernet(host: String, port: UInt16, localBindAddress: String?, preferredInterfaceName: String?) {
         mode = .ethernet(host: host, port: port)
         networkTransport = NetworkTransport(statusCallback: statusCallback, logCallback: logCallback)
-        networkTransport?.connect(to: host, port: port, wiredOnly: true)
+        networkTransport?.connect(
+            to: host,
+            port: port,
+            wiredOnly: true,
+            wifiOrEthernetOnly: true,
+            localBindAddress: localBindAddress,
+            preferredInterfaceName: preferredInterfaceName
+        )
     }
 
-    func connectHybrid(usbPath: String, ethernetHost: String, port: UInt16) {
+    func connectHybrid(usbPath: String, ethernetHost: String, port: UInt16, ethernetLocalBindAddress: String?, ethernetInterfaceName: String?) {
         mode = .hybrid(usbPath: usbPath, ethernetHost: ethernetHost, port: port)
         usbTransport = USBTransport(devicePath: usbPath, statusCallback: { [weak self] connected, _ in
             self?.logCallback?("USB \(connected ? "connected" : "disconnected")")
@@ -77,14 +91,21 @@ final class HybridTransport {
             self?.logCallback?("Ethernet \(connected ? "connected" : "disconnected")")
         }, logCallback: logCallback)
         usbTransport?.connect()
-        networkTransport?.connect(to: ethernetHost, port: port, wiredOnly: true)
+        networkTransport?.connect(
+            to: ethernetHost,
+            port: port,
+            wiredOnly: true,
+            wifiOrEthernetOnly: true,
+            localBindAddress: ethernetLocalBindAddress,
+            preferredInterfaceName: ethernetInterfaceName
+        )
     }
 
     func send(data: Data) {
         queue.async { [weak self] in
-            if let usb = self?.usbTransport {
+            if let usb = self?.usbTransport, usb.canSend {
                 usb.send(data: data)
-            } else if let network = self?.networkTransport {
+            } else if let network = self?.networkTransport, network.canSend {
                 network.send(data: data)
             }
         }

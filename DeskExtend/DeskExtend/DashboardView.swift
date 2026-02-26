@@ -253,19 +253,58 @@ struct ConnectionTabView: View {
                     .pickerStyle(.segmented)
                 }
                 
-                GlassCard(title: "Pi Address", value: piAddressInput.isEmpty ? "Auto-detect" : piAddressInput) {
-                    VStack(spacing: 8) {
-                        TextField("e.g., 192.168.1.100", text: $piAddressInput)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 11, design: .monospaced))
-                        HStack(spacing: 8) {
-                            Text("Port")
-                                .font(.system(size: 11))
-                            Spacer()
-                            TextField("5900", text: $piPort)
+                if appManager.connectionMode == .network {
+                    GlassCard(title: "Pi Address", value: piAddressInput.isEmpty ? "Auto-detect" : piAddressInput) {
+                        VStack(spacing: 8) {
+                            TextField("e.g., 192.168.1.100", text: $piAddressInput)
                                 .textFieldStyle(.roundedBorder)
-                                .frame(width: 80)
                                 .font(.system(size: 11, design: .monospaced))
+                            HStack(spacing: 8) {
+                                Text("Port")
+                                    .font(.system(size: 11))
+                                Spacer()
+                                TextField("5900", text: $piPort)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 80)
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                        }
+                    }
+                }
+
+                if appManager.connectionMode == .ethernet || appManager.connectionMode == .hybrid {
+                    GlassCard(title: "Ethernet Port", value: appManager.selectedEthernetInterface.isEmpty ? "Not selected" : appManager.selectedEthernetInterface) {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 8) {
+                                Button(action: { appManager.refreshEthernetInterfaces() }) {
+                                    Label("Refresh Ports", systemImage: "arrow.clockwise")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Spacer()
+
+                                if !appManager.ethernetInterfaces.isEmpty {
+                                    Text("\(appManager.ethernetInterfaces.count) available")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            if appManager.ethernetInterfaces.isEmpty {
+                                Text("No wired Ethernet interface detected")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Picker("", selection: $appManager.selectedEthernetInterface) {
+                                    ForEach(appManager.ethernetInterfaces) { item in
+                                        Text(item.label).tag(item.name)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: .infinity)
+                            }
                         }
                     }
                 }
@@ -458,6 +497,7 @@ struct ConnectionTabView: View {
                 usbDeviceInput = appManager.usbDevice
             }
             appManager.refreshUsbDevices()
+            appManager.refreshEthernetInterfaces()
         }
     }
 }

@@ -14,6 +14,11 @@ class NetworkTransport {
     private var reconnectTimer: Timer?
     private var isAttemptingConnection = false
     private var wiredEthernetOnly = false
+    private var wifiOrEthernetOnly = false
+    
+    private let maxInflightFrames = 30
+    private var inflightFrames = 0
+    private let inflightQueue = DispatchQueue(label: "com.virtualdisplay.network.inflight")
     
     var currentBitrate: Double = 0.0
     var connectedAddress: String = "Not connected"
@@ -23,7 +28,7 @@ class NetworkTransport {
         self.logCallback = logCallback
     }
     
-    func connect(to host: String, wiredOnly: Bool = false) {
+    func connect(to host: String, wiredOnly: Bool = false, wifiOrEthernetOnly: Bool = false) {
         guard !host.trimmingCharacters(in: .whitespaces).isEmpty else {
             logCallback?("No address provided")
             statusCallback?(false, "Not connected")
@@ -32,6 +37,7 @@ class NetworkTransport {
 
         targetHost = host
         wiredEthernetOnly = wiredOnly
+        self.wifiOrEthernetOnly = wifiOrEthernetOnly
         isAttemptingConnection = true
         connection?.cancel()
         
@@ -48,6 +54,8 @@ class NetworkTransport {
             parameters.prohibitedInterfaceTypes = [.wifi, .cellular, .loopback]
             parameters.prohibitExpensivePaths = true
             parameters.prohibitConstrainedPaths = true
+        } else if wifiOrEthernetOnly {
+            parameters.prohibitedInterfaceTypes = [.cellular, .loopback]
         }
         
         let newConnection = NWConnection(
@@ -59,6 +67,8 @@ class NetworkTransport {
 
         if wiredOnly {
             logCallback?("Connecting to \(host):\(port) via wired Ethernet...")
+        } else if wifiOrEthernetOnly {
+            logCallback?("Connecting to \(host):\(port) via Wi-Fi/Ethernet...")
         } else {
             logCallback?("Connecting to \(host):\(port) via TCP...")
         }
@@ -101,7 +111,11 @@ class NetworkTransport {
         DispatchQueue.main.async { [weak self] in
             self?.reconnectTimer?.invalidate()
             self?.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
-                self?.connect(to: targetHost, wiredOnly: self?.wiredEthernetOnly ?? false)
+                self?.connect(
+                    to: targetHost,
+                    wiredOnly: self?.wiredEthernetOnly ?? false,
+                    wifiOrEthernetOnly: self?.wifiOrEthernetOnly ?? false
+                )
             }
         }
     }
@@ -111,17 +125,34 @@ class NetworkTransport {
             return 
         }
 
-        var header = UInt32(data.count).bigEndian
-        let headerData = Data(bytes: &header, count: MemoryLayout<UInt32>.size)
+        var shouldDrop = false
+        inflightQueue.sync {
+            if inflightFrames >= maxInflightFrames {
+                shouldDrop = true
+            } else {
+                inflightFrames += 1
+            }
+        }
+        
+        if shouldDrop {
+            return
+        }
 
-        connection.send(content: headerData, completion: .idempotent)
+        var header = UInt32(data.count).bigEndian
+        var payload = Data(bytes: &header, count: MemoryLayout<UInt32>.size)
+        payload.append(data)
+
         connection.send(
-            content: data,
+            content: payload,
             completion: .contentProcessed { [weak self] error in
+                self?.inflightQueue.sync {
+                    self?.inflightFrames -= 1
+                }
+                
                 if let error = error {
                     self?.logCallback?("Send error: \(error.localizedDescription)")
                 } else {
-                    self?.updateStats(bytesSent: headerData.count + data.count)
+                    self?.updateStats(bytesSent: payload.count)
                 }
             }
         )

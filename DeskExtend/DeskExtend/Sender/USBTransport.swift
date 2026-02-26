@@ -12,6 +12,9 @@ final class USBTransport {
 
     var currentBitrate: Double = 0.0
     var connectedAddress: String = "Not connected"
+    var canSend: Bool {
+        isConnected && fileHandle != nil
+    }
     private var bytesSent: UInt64 = 0
     private var lastStatsTime = Date()
 
