@@ -1009,8 +1009,11 @@ class VideoReceiver:
                 pass
 
         try:
+            route_cmd = ["ip", "route", "get", client_ip]
+            if ":" in client_ip:
+                route_cmd = ["ip", "-6", "route", "get", client_ip]
             result = subprocess.run(
-                ["ip", "route", "get", client_ip],
+                route_cmd,
                 capture_output=True,
                 text=True,
                 timeout=1.0
