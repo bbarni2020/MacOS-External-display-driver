@@ -94,6 +94,15 @@ final class AppManager: ObservableObject {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let host = trimmed.isEmpty ? networkHost : trimmed
         let targetPort = port > 0 ? port : networkPort
+
+        if connectionMode != .network {
+            refreshUsbDevices()
+            if usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                appendLog("No USB device available for connection")
+                return
+            }
+        }
+
         appendLog("Connecting to \(host):\(targetPort)...")
         let config = buildConfig()
         let request = ConnectionRequest(

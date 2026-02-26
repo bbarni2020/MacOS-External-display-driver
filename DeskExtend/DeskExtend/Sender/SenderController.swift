@@ -24,17 +24,8 @@ class SenderController {
         pendingRequest = request
         
         let virtualName = ConfigurationManager.shared.virtualDisplayName
-        let targetDisplay: DisplayInfo?
-        if let vd = DisplayManager.shared.displayNamed(virtualName) {
-            targetDisplay = vd
-        } else if let byIndex = DisplayManager.shared.display(at: request.displayIndex) {
-            targetDisplay = byIndex
-        } else {
-            targetDisplay = DisplayManager.shared.mainDisplay()
-        }
-
-        guard let targetDisplayUnwrapped = targetDisplay else {
-            appManager?.appendLog("Target display not found")
+        guard let targetDisplayUnwrapped = DisplayManager.shared.displayNamed(virtualName) else {
+            appManager?.appendLog("Virtual display '\(virtualName)' not found")
             return
         }
         
@@ -50,10 +41,18 @@ class SenderController {
         
         switch request.mode {
         case .usb:
+            if request.usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                appManager?.appendLog("USB mode selected but no USB device path is configured")
+                return
+            }
             transport.connectUSB(devicePath: request.usbDevice)
         case .network:
             transport.connectNetwork(host: request.host, port: UInt16(request.port))
         case .hybrid:
+            if request.usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                appManager?.appendLog("Hybrid mode selected but no USB device path is configured")
+                return
+            }
             transport.connectHybrid(usbPath: request.usbDevice, networkHost: request.host, port: UInt16(request.port))
         }
         

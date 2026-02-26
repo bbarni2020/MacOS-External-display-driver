@@ -81,7 +81,29 @@ class VideoReceiver:
         self.available_usb_devices = []
         self.usb_monitor_thread = None
         self.usb_scan_interval = float(os.environ.get("DESKEXTEND_USB_SCAN_INTERVAL", "1"))
+        self.transport_lock = threading.Lock()
+        self.active_transport = None
         self.refresh_usb_devices()
+
+    def try_claim_transport(self, transport_name):
+        with self.transport_lock:
+            if self.active_transport is None:
+                self.active_transport = transport_name
+                return True
+            return self.active_transport == transport_name
+
+    def release_transport(self, transport_name):
+        with self.transport_lock:
+            if self.active_transport == transport_name:
+                self.active_transport = None
+
+    def is_transport_busy_for(self, transport_name):
+        with self.transport_lock:
+            return self.active_transport is not None and self.active_transport != transport_name
+
+    def has_active_transport(self):
+        with self.transport_lock:
+            return self.active_transport is not None
 
     def mark_stream_connected(self, transport_name):
         with self.stream_state_lock:
@@ -137,7 +159,8 @@ class VideoReceiver:
             interval = max(0.2, self.usb_scan_interval)
             while self.running:
                 try:
-                    self.refresh_usb_devices()
+                    if not self.has_active_transport():
+                        self.refresh_usb_devices()
                 except Exception as e:
                     logger.warning(f"USB monitor error: {e}")
                 time.sleep(interval)
@@ -1027,6 +1050,10 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
 
+                if self.is_transport_busy_for("USB"):
+                    time.sleep(0.5)
+                    continue
+
                 self.refresh_usb_devices()
 
                 if self.usb_device:
@@ -1056,40 +1083,48 @@ class VideoReceiver:
                         retry_delay = min(max_retry_delay, retry_delay * 1.5)
                         continue
 
-                self.schedule_hide_when_window_present(
-                    ["vaapisink", "autovideosink", "gst-launch-1.0"],
-                    appear_timeout=3.0,
-                    after_delay=5.0
-                )
-
-                if not self.start_decoder():
+                if not self.try_claim_transport("USB"):
                     self.close_usb()
-                    self.show_chromium_kiosk()
-                    time.sleep(retry_delay)
-                    retry_delay = min(max_retry_delay, retry_delay * 1.5)
+                    time.sleep(0.5)
                     continue
 
-                logger.info(f"[{self.device_name}] USB connection established")
-                retry_delay = 1.0
-                self.frame_count = 0
-                self.bytes_received = 0
-                self.last_fps_time = time.time()
+                try:
+                    self.schedule_hide_when_window_present(
+                        ["vaapisink", "autovideosink", "gst-launch-1.0"],
+                        appear_timeout=3.0,
+                        after_delay=5.0
+                    )
 
-                self.process_stream(self.serial_conn)
+                    if not self.start_decoder():
+                        self.close_usb()
+                        self.show_chromium_kiosk()
+                        time.sleep(retry_delay)
+                        retry_delay = min(max_retry_delay, retry_delay * 1.5)
+                        continue
 
-                self.close_usb()
+                    logger.info(f"[{self.device_name}] USB connection established")
+                    retry_delay = 1.0
+                    self.frame_count = 0
+                    self.bytes_received = 0
+                    self.last_fps_time = time.time()
 
-                if self.decoder_process:
-                    self.decoder_process.terminate()
-                    try:
-                        self.decoder_process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        self.decoder_process.kill()
-                    self.decoder_process = None
+                    self.process_stream(self.serial_conn)
 
-                logger.info("USB connection closed, waiting for next connection...")
-                self.show_chromium_kiosk()
-                time.sleep(1)
+                    self.close_usb()
+
+                    if self.decoder_process:
+                        self.decoder_process.terminate()
+                        try:
+                            self.decoder_process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            self.decoder_process.kill()
+                        self.decoder_process = None
+
+                    logger.info("USB connection closed, waiting for next connection...")
+                    self.show_chromium_kiosk()
+                    time.sleep(1)
+                finally:
+                    self.release_transport("USB")
 
             except Exception as e:
                 if self.running:
@@ -1117,6 +1152,10 @@ class VideoReceiver:
             try:
                 if not self.display_connected:
                     time.sleep(1)
+                    continue
+
+                if self.is_transport_busy_for("USB"):
+                    time.sleep(0.5)
                     continue
 
                 self.refresh_usb_devices()
@@ -1152,36 +1191,44 @@ class VideoReceiver:
                         retry_delay = 1.0
 
                     if usb_active:
-                        self.schedule_hide_when_window_present(
-                            ["vaapisink", "autovideosink", "gst-launch-1.0"],
-                            appear_timeout=3.0,
-                            after_delay=5.0
-                        )
-                        if not self.start_decoder():
+                        if not self.try_claim_transport("USB"):
                             self.close_usb()
                             usb_active = False
-                            self.show_chromium_kiosk()
-                            retry_delay = min(max_retry_delay, retry_delay * 1.5)
-                        else:
-                            logger.info("USB connected, processing stream...")
-                            retry_delay = 1.0
-                            self.frame_count = 0
-                            self.bytes_received = 0
-                            self.last_fps_time = time.time()
-                            self.process_stream(self.serial_conn)
-                            self.close_usb()
-                            usb_active = False
-                            if self.decoder_process:
-                                self.decoder_process.terminate()
-                                try:
-                                    self.decoder_process.wait(timeout=3)
-                                except subprocess.TimeoutExpired:
-                                    self.decoder_process.kill()
-                                self.decoder_process = None
-                            logger.info("USB connection closed")
-                            self.show_chromium_kiosk()
-                            time.sleep(1)
+                            time.sleep(0.5)
                             continue
+                        try:
+                            self.schedule_hide_when_window_present(
+                                ["vaapisink", "autovideosink", "gst-launch-1.0"],
+                                appear_timeout=3.0,
+                                after_delay=5.0
+                            )
+                            if not self.start_decoder():
+                                self.close_usb()
+                                usb_active = False
+                                self.show_chromium_kiosk()
+                                retry_delay = min(max_retry_delay, retry_delay * 1.5)
+                            else:
+                                logger.info("USB connected, processing stream...")
+                                retry_delay = 1.0
+                                self.frame_count = 0
+                                self.bytes_received = 0
+                                self.last_fps_time = time.time()
+                                self.process_stream(self.serial_conn)
+                                self.close_usb()
+                                usb_active = False
+                                if self.decoder_process:
+                                    self.decoder_process.terminate()
+                                    try:
+                                        self.decoder_process.wait(timeout=3)
+                                    except subprocess.TimeoutExpired:
+                                        self.decoder_process.kill()
+                                    self.decoder_process = None
+                                logger.info("USB connection closed")
+                                self.show_chromium_kiosk()
+                                time.sleep(1)
+                                continue
+                        finally:
+                            self.release_transport("USB")
 
                 logger.info(f"[{self.device_name}] Listening on network {self.host}:{self.port}")
                 if not self.bind_socket():
@@ -1195,40 +1242,47 @@ class VideoReceiver:
                     conn, addr = self.sock.accept()
                     logger.info(f"[{self.device_name}] Connected from {addr}")
 
-                    self.schedule_hide_when_window_present(
-                        ["vaapisink", "autovideosink", "gst-launch-1.0"],
-                        appear_timeout=3.0,
-                        after_delay=5.0
-                    )
-
-                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
-
-                    if not self.start_decoder():
+                    if not self.try_claim_transport("Network"):
                         conn.close()
-                        self.sock.close()
-                        self.show_chromium_kiosk()
                         continue
 
-                    self.frame_count = 0
-                    self.bytes_received = 0
-                    self.last_fps_time = time.time()
+                    try:
+                        self.schedule_hide_when_window_present(
+                            ["vaapisink", "autovideosink", "gst-launch-1.0"],
+                            appear_timeout=3.0,
+                            after_delay=5.0
+                        )
 
-                    self.process_stream(conn)
+                        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                        conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
 
-                    conn.close()
+                        if not self.start_decoder():
+                            conn.close()
+                            self.sock.close()
+                            self.show_chromium_kiosk()
+                            continue
 
-                    if self.decoder_process:
-                        self.decoder_process.terminate()
-                        try:
-                            self.decoder_process.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            self.decoder_process.kill()
-                        self.decoder_process = None
+                        self.frame_count = 0
+                        self.bytes_received = 0
+                        self.last_fps_time = time.time()
 
-                    self.sock.close()
-                    logger.info("Network connection closed")
-                    self.show_chromium_kiosk()
+                        self.process_stream(conn)
+
+                        conn.close()
+
+                        if self.decoder_process:
+                            self.decoder_process.terminate()
+                            try:
+                                self.decoder_process.wait(timeout=3)
+                            except subprocess.TimeoutExpired:
+                                self.decoder_process.kill()
+                            self.decoder_process = None
+
+                        self.sock.close()
+                        logger.info("Network connection closed")
+                        self.show_chromium_kiosk()
+                    finally:
+                        self.release_transport("Network")
 
                 except socket.timeout:
                     if self.usb_device:
@@ -1287,41 +1341,52 @@ class VideoReceiver:
                     time.sleep(1)
                     continue
 
+                if self.is_transport_busy_for("Network"):
+                    time.sleep(0.5)
+                    continue
+
                 conn, addr = self.sock.accept()
                 logger.info(f"[{self.device_name}] Connected from {addr}")
 
-                self.schedule_hide_when_window_present(
-                    ["vaapisink", "autovideosink", "gst-launch-1.0"],
-                    appear_timeout=3.0,
-                    after_delay=5.0
-                )
-
-                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
-
-                if not self.start_decoder():
+                if not self.try_claim_transport("Network"):
                     conn.close()
-                    self.show_chromium_kiosk()
                     continue
 
-                self.frame_count = 0
-                self.bytes_received = 0
-                self.last_fps_time = time.time()
+                try:
+                    self.schedule_hide_when_window_present(
+                        ["vaapisink", "autovideosink", "gst-launch-1.0"],
+                        appear_timeout=3.0,
+                        after_delay=5.0
+                    )
 
-                self.process_stream(conn)
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
 
-                conn.close()
+                    if not self.start_decoder():
+                        conn.close()
+                        self.show_chromium_kiosk()
+                        continue
 
-                if self.decoder_process:
-                    self.decoder_process.terminate()
-                    try:
-                        self.decoder_process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        self.decoder_process.kill()
-                    self.decoder_process = None
+                    self.frame_count = 0
+                    self.bytes_received = 0
+                    self.last_fps_time = time.time()
 
-                logger.info("Network connection closed, waiting for next connection...")
-                self.show_chromium_kiosk()
+                    self.process_stream(conn)
+
+                    conn.close()
+
+                    if self.decoder_process:
+                        self.decoder_process.terminate()
+                        try:
+                            self.decoder_process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            self.decoder_process.kill()
+                        self.decoder_process = None
+
+                    logger.info("Network connection closed, waiting for next connection...")
+                    self.show_chromium_kiosk()
+                finally:
+                    self.release_transport("Network")
 
             except socket.timeout:
                 continue
