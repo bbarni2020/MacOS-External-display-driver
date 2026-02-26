@@ -85,6 +85,9 @@ class VideoReceiver:
         self.active_transport = None
         self.ethernet_interface = self.detect_ethernet_interface()
         self.max_frame_size = int(os.environ.get("DESKEXTEND_MAX_FRAME_SIZE", str(50 * 1024 * 1024)))
+        self.socket_rcvbuf = int(os.environ.get("DESKEXTEND_SOCKET_RCVBUF", str(8 * 1024 * 1024)))
+        self.socket_chunk_size = int(os.environ.get("DESKEXTEND_SOCKET_CHUNK_SIZE", str(512 * 1024)))
+        self.stream_compact_threshold = int(os.environ.get("DESKEXTEND_STREAM_COMPACT_THRESHOLD", str(1024 * 1024)))
         self.refresh_usb_devices()
 
     def try_claim_transport(self, transport_name):
@@ -1070,7 +1073,8 @@ class VideoReceiver:
         def make_socket(family):
             sock = socket.socket(family, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.socket_rcvbuf)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             if family == socket.AF_INET:
                 sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x10)
@@ -1096,7 +1100,7 @@ class VideoReceiver:
             try:
                 self.sock = make_socket(family)
                 self.sock.bind(bind_target)
-                self.sock.listen(5)
+                self.sock.listen(16)
                 self.sock.settimeout(5.0)
                 if ethernet_only:
                     iface = self.ethernet_interface or "auto"
@@ -1115,6 +1119,25 @@ class VideoReceiver:
 
         logger.error(f"Socket bind failed: {last_error}")
         return False
+
+    def configure_client_socket(self, conn):
+        try:
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        try:
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.socket_rcvbuf)
+        except Exception:
+            pass
+        try:
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except Exception:
+            pass
+        if hasattr(socket, "TCP_QUICKACK"):
+            try:
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+            except Exception:
+                pass
 
     def open_usb(self):
         if not self.usb_device:
@@ -1166,10 +1189,17 @@ class VideoReceiver:
             self.bytes_received = 0
             self.last_fps_time = now
 
-    def read_from_connection(self, conn, chunk_size=262144):
+    def read_from_connection(self, conn, chunk_size=None, recv_buffer=None):
+        if chunk_size is None:
+            chunk_size = self.socket_chunk_size
         try:
             if serial and hasattr(serial, "Serial") and isinstance(conn, serial.Serial):
                 return conn.read(min(chunk_size, 4096)) if conn.in_waiting else b""
+            if recv_buffer is not None:
+                received = conn.recv_into(recv_buffer, min(chunk_size, len(recv_buffer)))
+                if received == 0:
+                    return None
+                return recv_buffer[:received]
             chunk = conn.recv(chunk_size)
             if not chunk:
                 return None
@@ -1191,13 +1221,19 @@ class VideoReceiver:
         self.mark_stream_connected(transport_name)
         self.is_video_streaming = True
 
-        buffer = b""
+        buffer = bytearray()
+        parse_offset = 0
         last_data_time = time.time()
+        recv_array = None
+        recv_view = None
+        if not is_serial:
+            recv_array = bytearray(self.socket_chunk_size)
+            recv_view = memoryview(recv_array)
 
         try:
             while self.running:
                 try:
-                    chunk = self.read_from_connection(conn)
+                    chunk = self.read_from_connection(conn, recv_buffer=recv_view)
                     if chunk is None:
                         logger.info("Connection closed by peer.")
                         break
@@ -1211,38 +1247,54 @@ class VideoReceiver:
                     if is_serial:
                         last_data_time = time.time()
 
-                    buffer += chunk
-                    self.bytes_received += len(chunk)
+                    buffer.extend(chunk)
+                    chunk_len = len(chunk)
+                    self.bytes_received += chunk_len
 
-                    while len(buffer) >= 4:
-                        frame_size = struct.unpack(">I", buffer[:4]
-                        )[0]
+                    while len(buffer) - parse_offset >= 4:
+                        frame_size = struct.unpack_from(">I", buffer, parse_offset)[0]
 
                         if frame_size > self.max_frame_size:
                             logger.warning(f"Invalid frame size: {frame_size} - Connection considered corrupt, dropping.")
                             return False
 
-                        if len(buffer) < 4 + frame_size:
+                        frame_total = 4 + frame_size
+                        if len(buffer) - parse_offset < frame_total:
                             break
 
-                        frame_data = buffer[4:4 + frame_size]
-                        buffer = buffer[4 + frame_size:]
+                        frame_start = parse_offset + 4
+                        frame_end = frame_start + frame_size
+                        frame_view = memoryview(buffer)[frame_start:frame_end]
+                        parse_offset += frame_total
 
                         if self.decoder_process and self.decoder_process.stdin:
                             try:
-                                self.decoder_process.stdin.write(frame_data)
-                                self.decoder_process.stdin.flush()
+                                self.decoder_process.stdin.write(frame_view)
                                 self.update_fps()
                             except BrokenPipeError:
+                                frame_view.release()
                                 logger.error("Decoder pipe broken - restarting...")
                                 self.is_video_streaming = False
                                 self.show_chromium_kiosk()
                                 return False
                             except Exception as e:
+                                frame_view.release()
                                 logger.error(f"Decoder write error: {e}")
                                 self.is_video_streaming = False
                                 self.show_chromium_kiosk()
                                 return False
+                        frame_view.release()
+
+                    if parse_offset:
+                        if parse_offset == len(buffer):
+                            buffer.clear()
+                            parse_offset = 0
+                        elif parse_offset >= self.stream_compact_threshold:
+                            del buffer[:parse_offset]
+                            parse_offset = 0
+                        elif parse_offset >= (len(buffer) // 2):
+                            del buffer[:parse_offset]
+                            parse_offset = 0
 
                 except socket.error as e:
                     logger.error(f"Socket error: {e}")
@@ -1474,8 +1526,7 @@ class VideoReceiver:
                             after_delay=5.0
                         )
 
-                        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                        conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+                        self.configure_client_socket(conn)
 
                         if not self.start_decoder():
                             conn.close()
@@ -1585,8 +1636,7 @@ class VideoReceiver:
                         after_delay=5.0
                     )
 
-                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+                    self.configure_client_socket(conn)
                     conn.settimeout(5.0)
 
                     if not self.start_decoder():
@@ -1659,8 +1709,7 @@ class VideoReceiver:
                         after_delay=5.0
                     )
 
-                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+                    self.configure_client_socket(conn)
                     conn.settimeout(5.0)
 
                     if not self.start_decoder():
