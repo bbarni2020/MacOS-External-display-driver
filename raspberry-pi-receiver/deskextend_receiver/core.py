@@ -85,9 +85,9 @@ class VideoReceiver:
         self.active_transport = None
         self.ethernet_interface = self.detect_ethernet_interface()
         self.max_frame_size = int(os.environ.get("DESKEXTEND_MAX_FRAME_SIZE", str(50 * 1024 * 1024)))
-        self.socket_rcvbuf = int(os.environ.get("DESKEXTEND_SOCKET_RCVBUF", str(8 * 1024 * 1024)))
-        self.socket_chunk_size = int(os.environ.get("DESKEXTEND_SOCKET_CHUNK_SIZE", str(512 * 1024)))
-        self.stream_compact_threshold = int(os.environ.get("DESKEXTEND_STREAM_COMPACT_THRESHOLD", str(1024 * 1024)))
+        self.socket_rcvbuf = int(os.environ.get("DESKEXTEND_SOCKET_RCVBUF", str(16 * 1024 * 1024)))
+        self.socket_chunk_size = int(os.environ.get("DESKEXTEND_SOCKET_CHUNK_SIZE", str(1024 * 1024)))
+        self.stream_compact_threshold = int(os.environ.get("DESKEXTEND_STREAM_COMPACT_THRESHOLD", str(2 * 1024 * 1024)))
         self.refresh_usb_devices()
 
     def try_claim_transport(self, transport_name):
@@ -1074,6 +1074,7 @@ class VideoReceiver:
             sock = socket.socket(family, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.socket_rcvbuf)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, self.socket_rcvbuf)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             if family == socket.AF_INET:
@@ -1130,12 +1131,21 @@ class VideoReceiver:
         except Exception:
             pass
         try:
+            conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, self.socket_rcvbuf)
+        except Exception:
+            pass
+        try:
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         except Exception:
             pass
         if hasattr(socket, "TCP_QUICKACK"):
             try:
                 conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, 1)
+            except Exception:
+                pass
+        if hasattr(socket, "TCP_WINDOW_CLAMP"):
+            try:
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_WINDOW_CLAMP, self.socket_rcvbuf)
             except Exception:
                 pass
 
