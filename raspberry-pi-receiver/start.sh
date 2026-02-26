@@ -6,10 +6,12 @@ BRANCH="main"
 FOLDER="raspberry-pi-receiver"
 DEST="${PWD}"
 DISPLAY_NAME="DeskExtend Display"
+MODE="network"
 
 for arg in "$@"; do
   case "$arg" in
     branch=*) BRANCH="${arg#branch=}" ;;
+    mode=*) MODE="${arg#mode=}" ;;
   esac
 done
 echo "Updating DeskExtend Receiver from $REPO (branch $BRANCH)..."
@@ -86,4 +88,4 @@ if [ -z "$XAUTHORITY" ] && [ -f "/home/pi/.Xauthority" ]; then
 fi
 
 . "$DEST/venv/bin/activate"
-env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME"
+env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME" --mode "$MODE"

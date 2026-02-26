@@ -889,6 +889,63 @@ class VideoReceiver:
     def bind_socket(self):
         return self.bind_socket_for_mode(ethernet_only=False)
 
+    @staticmethod
+    def _is_wifi_interface(iface):
+        return iface.startswith("wl") or os.path.exists(f"/sys/class/net/{iface}/wireless")
+
+    @staticmethod
+    def _is_wired_interface(iface):
+        if iface == "lo":
+            return False
+        if iface.startswith("wl"):
+            return False
+        return iface.startswith("eth") or iface.startswith("en") or iface.startswith("enx")
+
+    def get_mode_interfaces(self, mode_name):
+        interfaces = []
+        try:
+            for iface in os.listdir("/sys/class/net"):
+                if iface == "lo":
+                    continue
+                if mode_name == "ethernet":
+                    if self._is_wired_interface(iface):
+                        interfaces.append(iface)
+                elif mode_name == "network":
+                    if self._is_wired_interface(iface) or self._is_wifi_interface(iface):
+                        interfaces.append(iface)
+        except Exception:
+            return []
+        return sorted(set(interfaces))
+
+    def is_allowed_network_client(self, client_ip, mode_name):
+        if mode_name not in ("network", "ethernet"):
+            return True
+
+        allowed_interfaces = self.get_mode_interfaces(mode_name)
+        if not allowed_interfaces:
+            return True
+
+        try:
+            result = subprocess.run(
+                ["ip", "route", "get", client_ip],
+                capture_output=True,
+                text=True,
+                timeout=1.0
+            )
+            if result.returncode != 0:
+                return True
+
+            parts = result.stdout.strip().split()
+            if "dev" in parts:
+                index = parts.index("dev")
+                if index + 1 < len(parts):
+                    dev = parts[index + 1]
+                    return dev in allowed_interfaces
+        except Exception:
+            return True
+
+        return True
+
     def detect_ethernet_interface(self):
         preferred = os.environ.get("DESKEXTEND_ETH_INTERFACE", "").strip()
         if preferred:
@@ -1008,10 +1065,10 @@ class VideoReceiver:
             logger.error(f"Read error: {e}")
             return None
 
-    def process_stream(self, conn):
+    def process_stream(self, conn, forced_transport_name=None):
         logger.info("Processing video stream...")
         is_serial = serial and hasattr(serial, "Serial") and isinstance(conn, serial.Serial)
-        transport_name = "USB" if is_serial else "Network"
+        transport_name = forced_transport_name or ("USB" if is_serial else "Network")
         self.mark_stream_connected(transport_name)
         self.is_video_streaming = True
 
@@ -1288,6 +1345,12 @@ class VideoReceiver:
                     conn, addr = self.sock.accept()
                     logger.info(f"[{self.device_name}] Connected from {addr}")
 
+                    client_ip = addr[0] if isinstance(addr, tuple) else str(addr)
+                    if not self.is_allowed_network_client(client_ip, "ethernet"):
+                        logger.warning("Rejected non-Ethernet client in hybrid fallback mode: %s", client_ip)
+                        conn.close()
+                        continue
+
                     if not self.try_claim_transport("Network"):
                         conn.close()
                         continue
@@ -1312,7 +1375,7 @@ class VideoReceiver:
                         self.bytes_received = 0
                         self.last_fps_time = time.time()
 
-                        self.process_stream(conn)
+                        self.process_stream(conn, forced_transport_name="Ethernet")
 
                         conn.close()
 
@@ -1396,6 +1459,12 @@ class VideoReceiver:
                 conn, addr = self.sock.accept()
                 logger.info(f"[{self.device_name}] Connected from {addr}")
 
+                client_ip = addr[0] if isinstance(addr, tuple) else str(addr)
+                if not self.is_allowed_network_client(client_ip, "network"):
+                    logger.warning("Rejected client outside network mode policy: %s", client_ip)
+                    conn.close()
+                    continue
+
                 if not self.try_claim_transport("Network"):
                     conn.close()
                     continue
@@ -1419,7 +1488,7 @@ class VideoReceiver:
                     self.bytes_received = 0
                     self.last_fps_time = time.time()
 
-                    self.process_stream(conn)
+                    self.process_stream(conn, forced_transport_name="Network")
 
                     conn.close()
 
@@ -1466,6 +1535,12 @@ class VideoReceiver:
                 conn, addr = self.sock.accept()
                 logger.info(f"[{self.device_name}] Ethernet connected from {addr}")
 
+                client_ip = addr[0] if isinstance(addr, tuple) else str(addr)
+                if not self.is_allowed_network_client(client_ip, "ethernet"):
+                    logger.warning("Rejected non-Ethernet client in ethernet mode: %s", client_ip)
+                    conn.close()
+                    continue
+
                 if not self.try_claim_transport("Ethernet"):
                     conn.close()
                     continue
@@ -1489,7 +1564,7 @@ class VideoReceiver:
                     self.bytes_received = 0
                     self.last_fps_time = time.time()
 
-                    self.process_stream(conn)
+                    self.process_stream(conn, forced_transport_name="Ethernet")
                     conn.close()
 
                     if self.decoder_process:

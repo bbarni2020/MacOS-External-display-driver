@@ -27,7 +27,7 @@ def build_parser():
         "--mode",
         choices=["network", "ethernet", "usb", "hybrid", "all"],
         default="all",
-        help="Connection mode: network (TCP), ethernet (wired-only TCP), usb (serial), hybrid (USB+Ethernet failover), or all (USB+network)"
+        help="Connection mode: network (Wi-Fi/Ethernet TCP), ethernet (wired-only TCP), usb (serial), hybrid (USB+Ethernet failover), or all (USB+network)"
     )
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (network/ethernet/hybrid/all mode)")
     parser.add_argument("--port", type=int, default=5900, help="TCP port (network/ethernet/hybrid/all mode)")
