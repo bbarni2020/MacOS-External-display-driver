@@ -4,7 +4,8 @@ final class HybridTransport {
     enum TransportMode {
         case usb(devicePath: String)
         case network(host: String, port: UInt16)
-        case hybrid(usbPath: String, networkHost: String, port: UInt16)
+        case ethernet(host: String, port: UInt16)
+        case hybrid(usbPath: String, ethernetHost: String, port: UInt16)
     }
 
     private var usbTransport: USBTransport?
@@ -22,10 +23,26 @@ final class HybridTransport {
     }
 
     var connectedAddress: String {
-        if let usb = usbTransport, usb.connectedAddress != "Not connected" {
-            return usb.connectedAddress
+        switch mode {
+        case .hybrid:
+            if let usb = usbTransport, usb.connectedAddress != "Not connected" {
+                return usb.connectedAddress
+            }
+            if let network = networkTransport, network.connectedAddress != "Not connected" {
+                return "Ethernet: \(network.connectedAddress)"
+            }
+            return "Not connected"
+        case .ethernet:
+            if let network = networkTransport, network.connectedAddress != "Not connected" {
+                return "Ethernet: \(network.connectedAddress)"
+            }
+            return "Not connected"
+        default:
+            if let usb = usbTransport, usb.connectedAddress != "Not connected" {
+                return usb.connectedAddress
+            }
+            return networkTransport?.connectedAddress ?? "Not connected"
         }
-        return networkTransport?.connectedAddress ?? "Not connected"
     }
 
     init(statusCallback: ((Bool, String) -> Void)? = nil, logCallback: ((String) -> Void)? = nil) {
@@ -42,19 +59,25 @@ final class HybridTransport {
     func connectNetwork(host: String, port: UInt16) {
         mode = .network(host: host, port: port)
         networkTransport = NetworkTransport(statusCallback: statusCallback, logCallback: logCallback)
-        networkTransport?.connect(to: host, port: port)
+        networkTransport?.connect(to: host, port: port, wiredOnly: false)
     }
 
-    func connectHybrid(usbPath: String, networkHost: String, port: UInt16) {
-        mode = .hybrid(usbPath: usbPath, networkHost: networkHost, port: port)
+    func connectEthernet(host: String, port: UInt16) {
+        mode = .ethernet(host: host, port: port)
+        networkTransport = NetworkTransport(statusCallback: statusCallback, logCallback: logCallback)
+        networkTransport?.connect(to: host, port: port, wiredOnly: true)
+    }
+
+    func connectHybrid(usbPath: String, ethernetHost: String, port: UInt16) {
+        mode = .hybrid(usbPath: usbPath, ethernetHost: ethernetHost, port: port)
         usbTransport = USBTransport(devicePath: usbPath, statusCallback: { [weak self] connected, _ in
             self?.logCallback?("USB \(connected ? "connected" : "disconnected")")
         }, logCallback: logCallback)
         networkTransport = NetworkTransport(statusCallback: { [weak self] connected, _ in
-            self?.logCallback?("Network \(connected ? "connected" : "disconnected")")
+            self?.logCallback?("Ethernet \(connected ? "connected" : "disconnected")")
         }, logCallback: logCallback)
         usbTransport?.connect()
-        networkTransport?.connect(to: networkHost, port: port)
+        networkTransport?.connect(to: ethernetHost, port: port, wiredOnly: true)
     }
 
     func send(data: Data) {
@@ -68,24 +91,21 @@ final class HybridTransport {
     }
 
     func stop() {
-        // Use sync to ensure cleanup completes before returning
         queue.sync {
             logCallback?("Stopping hybrid transport...")
-            
-            // Stop USB transport
+
             if let usb = usbTransport {
                 usb.stop()
                 logCallback?("USB transport stopped")
             }
             usbTransport = nil
-            
-            // Stop network transport
+
             if let network = networkTransport {
                 network.stop()
                 logCallback?("Network transport stopped")
             }
             networkTransport = nil
-            
+
             mode = nil
             statusCallback?(false, "Not connected")
             logCallback?("Hybrid transport stopped")

@@ -47,10 +47,11 @@ class DashboardViewController: NSViewController {
         view.addSubview(modeTitle)
         
         modeSelector = NSSegmentedControl(frame: NSRect(x: 20, y: 510, width: 340, height: 24))
-        modeSelector.segmentCount = 3
+        modeSelector.segmentCount = 4
         modeSelector.setLabel("USB", forSegment: 0)
         modeSelector.setLabel("Network", forSegment: 1)
-        modeSelector.setLabel("Hybrid", forSegment: 2)
+        modeSelector.setLabel("Ethernet", forSegment: 2)
+        modeSelector.setLabel("Hybrid", forSegment: 3)
         modeSelector.selectedSegment = 0
         modeSelector.target = self
         modeSelector.action = #selector(modeChanged)
@@ -254,7 +255,8 @@ class DashboardViewController: NSViewController {
         switch modeSelector.selectedSegment {
         case 0: return "usb"
         case 1: return "network"
-        case 2: return "hybrid"
+        case 2: return "ethernet"
+        case 3: return "hybrid"
         default: return "usb"
         }
     }
@@ -264,10 +266,11 @@ class DashboardViewController: NSViewController {
         
         let isUSB = (mode == "usb")
         let isNetwork = (mode == "network")
+        let isEthernet = (mode == "ethernet")
         let isHybrid = (mode == "hybrid")
         
         usbDeviceContainer.isHidden = !(isUSB || isHybrid)
-        addressInputContainer.isHidden = !(isNetwork || isHybrid)
+        addressInputContainer.isHidden = !(isNetwork || isEthernet || isHybrid)
         
         if isUSB || isHybrid {
             refreshUSBDevices()
@@ -324,7 +327,7 @@ class DashboardViewController: NSViewController {
         let address = addressInput.stringValue.trimmingCharacters(in: .whitespaces)
         let mode = getSelectedModeString()
         
-        if mode == "network" || mode == "hybrid" {
+        if mode == "network" || mode == "ethernet" || mode == "hybrid" {
             if !address.isEmpty {
                 ConfigurationManager.shared.networkHost = address
             }

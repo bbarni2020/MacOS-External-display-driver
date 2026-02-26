@@ -95,7 +95,7 @@ final class AppManager: ObservableObject {
         let host = trimmed.isEmpty ? networkHost : trimmed
         let targetPort = port > 0 ? port : networkPort
 
-        if connectionMode != .network {
+        if connectionMode == .usb || connectionMode == .hybrid {
             refreshUsbDevices()
             if usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appendLog("No USB device available for connection")
@@ -148,7 +148,7 @@ final class AppManager: ObservableObject {
         if usbRefreshTimer != nil { return }
         usbRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            if self.connectionMode != .network {
+            if self.connectionMode == .usb || self.connectionMode == .hybrid {
                 self.refreshUsbDevices()
             }
         }

@@ -5,7 +5,8 @@ class HybridTransport {
     enum TransportMode {
         case usb(devicePath: String)
         case network(host: String)
-        case hybrid(usbPath: String, networkHost: String)
+        case ethernet(host: String)
+        case hybrid(usbPath: String, ethernetHost: String)
     }
     
     private var usbTransport: USBTransport?
@@ -29,16 +30,18 @@ class HybridTransport {
         switch mode {
         case .hybrid:
             if usbConnected && networkConnected {
-                return "Hybrid: USB + Network"
+                return "Hybrid: USB + Ethernet"
             } else if usbConnected {
                 return usbTransport?.connectedAddress ?? "USB"
             } else if networkConnected {
-                return networkTransport?.connectedAddress ?? "Network"
+                return networkTransport?.connectedAddress ?? "Ethernet"
             }
             return "Not connected"
         case .usb:
             return usbTransport?.connectedAddress ?? "Not connected"
         case .network:
+            return networkTransport?.connectedAddress ?? "Not connected"
+        case .ethernet:
             return networkTransport?.connectedAddress ?? "Not connected"
         case .none:
             return "Not connected"
@@ -76,11 +79,25 @@ class HybridTransport {
             logCallback: logCallback
         )
         
-        networkTransport?.connect(to: host)
+        networkTransport?.connect(to: host, wiredOnly: false)
     }
     
-    func connectHybrid(usbPath: String, networkHost: String) {
-        mode = .hybrid(usbPath: usbPath, networkHost: networkHost)
+    func connectEthernet(host: String) {
+        mode = .ethernet(host: host)
+
+        networkTransport = NetworkTransport(
+            statusCallback: { [weak self] connected, address in
+                self?.networkConnected = connected
+                self?.statusCallback?(connected, address)
+            },
+            logCallback: logCallback
+        )
+
+        networkTransport?.connect(to: host, wiredOnly: true)
+    }
+
+    func connectHybrid(usbPath: String, ethernetHost: String) {
+        mode = .hybrid(usbPath: usbPath, ethernetHost: ethernetHost)
         
         usbTransport = USBTransport(
             devicePath: usbPath,
@@ -95,14 +112,14 @@ class HybridTransport {
         networkTransport = NetworkTransport(
             statusCallback: { [weak self] connected, address in
                 self?.networkConnected = connected
-                self?.logCallback?("Network: \(connected ? "connected" : "disconnected")")
+                self?.logCallback?("Ethernet: \(connected ? "connected" : "disconnected")")
                 self?.updateHybridStatus()
             },
             logCallback: logCallback
         )
         
         usbTransport?.connect()
-        networkTransport?.connect(to: networkHost)
+        networkTransport?.connect(to: ethernetHost, wiredOnly: true)
     }
     
     private func updateHybridStatus() {
@@ -120,6 +137,10 @@ class HybridTransport {
                     self.usbTransport?.send(data: data)
                 }
             case .network:
+                if self.networkConnected {
+                    self.networkTransport?.send(data: data)
+                }
+            case .ethernet:
                 if self.networkConnected {
                     self.networkTransport?.send(data: data)
                 }

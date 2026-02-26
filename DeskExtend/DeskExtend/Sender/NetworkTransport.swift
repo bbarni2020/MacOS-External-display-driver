@@ -8,6 +8,7 @@ class NetworkTransport {
     private var targetHost: String?
     private var reconnectTimer: Timer?
     private var isAttemptingConnection = false
+    private var wiredEthernetOnly = false
     
     private var bytesSent: UInt64 = 0
     private var lastStatsTime = Date()
@@ -22,7 +23,7 @@ class NetworkTransport {
         self.logCallback = logCallback
     }
     
-    func connect(to host: String, port: UInt16) {
+    func connect(to host: String, port: UInt16, wiredOnly: Bool = false) {
         let trimmed = host.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             logCallback?("No address provided")
@@ -31,6 +32,7 @@ class NetworkTransport {
         }
         targetHost = trimmed
         self.port = port
+        wiredEthernetOnly = wiredOnly
         isAttemptingConnection = true
         reconnectTimer?.invalidate()
         connection?.cancel()
@@ -44,10 +46,20 @@ class NetworkTransport {
         params.allowLocalEndpointReuse = true
         params.serviceClass = .responsiveData
         params.preferNoProxies = true
+        if wiredOnly {
+            params.requiredInterfaceType = .wiredEthernet
+            params.prohibitedInterfaceTypes = [.wifi, .cellular, .loopback]
+            params.prohibitExpensivePaths = true
+            params.prohibitConstrainedPaths = true
+        }
         
         let newConnection = NWConnection(host: NWEndpoint.Host(trimmed), port: NWEndpoint.Port(integerLiteral: port), using: params)
         connection = newConnection
-        logCallback?("Opening TCP to \(trimmed):\(port)")
+        if wiredOnly {
+            logCallback?("Opening wired Ethernet TCP to \(trimmed):\(port)")
+        } else {
+            logCallback?("Opening TCP to \(trimmed):\(port)")
+        }
         
         newConnection.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -88,7 +100,7 @@ class NetworkTransport {
             self?.reconnectTimer?.invalidate()
             self?.reconnectTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
-                self.connect(to: host, port: self.port)
+                self.connect(to: host, port: self.port, wiredOnly: self.wiredEthernetOnly)
             }
         }
     }
@@ -96,16 +108,14 @@ class NetworkTransport {
     func send(data: Data) {
         guard let connection = connection, connection.state == .ready else { return }
         
-        var packet = data
         var header = UInt32(data.count).bigEndian
-        let headerData = Data(bytes: &header, count: 4)
-        packet.insert(contentsOf: headerData, at: 0)
-        
-        connection.send(content: packet, completion: .contentProcessed { [weak self] error in
+        let headerData = Data(bytes: &header, count: MemoryLayout<UInt32>.size)
+        connection.send(content: headerData, completion: .idempotent)
+        connection.send(content: data, completion: .contentProcessed { [weak self] error in
             if let error = error {
                 self?.logCallback?("Send error: \(error.localizedDescription)")
             } else {
-                self?.updateStats(bytesSent: packet.count)
+                self?.updateStats(bytesSent: headerData.count + data.count)
             }
         })
     }

@@ -3,6 +3,7 @@ import Foundation
 enum ConnectionMode: String, CaseIterable, Identifiable {
     case usb
     case network
+    case ethernet
     case hybrid
 
     var id: String { rawValue }
@@ -11,6 +12,7 @@ enum ConnectionMode: String, CaseIterable, Identifiable {
         switch self {
         case .usb: return "USB"
         case .network: return "Network"
+        case .ethernet: return "Ethernet"
         case .hybrid: return "Hybrid"
         }
     }

@@ -270,7 +270,7 @@ struct ConnectionTabView: View {
                     }
                 }
 
-                if appManager.connectionMode != .network {
+                if appManager.connectionMode == .usb || appManager.connectionMode == .hybrid {
                     GlassCard(title: "USB Device", value: usbDeviceInput.isEmpty ? appManager.usbDevice : usbDeviceInput) {
                         VStack(spacing: 8) {
                             HStack(spacing: 8) {

@@ -25,12 +25,12 @@ def build_parser():
     parser = argparse.ArgumentParser(description="macOS External Display Receiver")
     parser.add_argument(
         "--mode",
-        choices=["network", "usb", "hybrid", "all"],
+        choices=["network", "ethernet", "usb", "hybrid", "all"],
         default="all",
-        help="Connection mode: network (TCP), usb (serial), hybrid (auto-failover), or all (both)"
+        help="Connection mode: network (TCP), ethernet (wired-only TCP), usb (serial), hybrid (USB+Ethernet failover), or all (USB+network)"
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Network bind address (network/hybrid/all mode)")
-    parser.add_argument("--port", type=int, default=5900, help="Network port (network/hybrid/all mode)")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind address (network/ethernet/hybrid/all mode)")
+    parser.add_argument("--port", type=int, default=5900, help="TCP port (network/ethernet/hybrid/all mode)")
     parser.add_argument("--usb-device", help="USB serial device path (use /dev/ttyGS0 for Pi gadget mode)")
     parser.add_argument("--name", help="Device name for identification (default: RaspberryPi)")
     parser.add_argument("--install", action="store_true", help="Install system and Python dependencies")
@@ -107,8 +107,9 @@ def main():
     )
 
     logger.info(f"Video receiver '{device_name}' starting in {args.mode} mode")
-    if args.mode in ["network", "hybrid", "all"]:
-        logger.info(f"  Network: {args.host}:{args.port}")
+    if args.mode in ["network", "ethernet", "hybrid", "all"]:
+        label = "Ethernet" if args.mode == "ethernet" else "Network"
+        logger.info(f"  {label}: {args.host}:{args.port}")
     if args.mode in ["usb", "hybrid", "all"]:
         logger.info(f"  USB device: {usb_device or 'auto-detect'}")
 

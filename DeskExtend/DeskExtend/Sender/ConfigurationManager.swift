@@ -16,6 +16,7 @@ final class ConfigurationManager {
         static let autoConnect = "DeskExtend.autoConnect"
         static let virtualDisplayName = "DeskExtend.virtualDisplayName"
         static let virtualDisplaySize = "DeskExtend.virtualDisplaySize"
+        static let selectedEthernetInterface = "DeskExtend.selectedEthernetInterface"
     }
 
     var selectedDisplayIndex: Int {
@@ -62,6 +63,15 @@ final class ConfigurationManager {
         }
         set {
             defaults.set(newValue, forKey: Keys.usbDevice)
+        }
+    }
+
+    var selectedEthernetInterface: String {
+        get {
+            defaults.string(forKey: Keys.selectedEthernetInterface) ?? ""
+        }
+        set {
+            defaults.set(newValue, forKey: Keys.selectedEthernetInterface)
         }
     }
 
@@ -139,5 +149,6 @@ final class ConfigurationManager {
         defaults.removeObject(forKey: Keys.autoConnect)
         defaults.removeObject(forKey: Keys.virtualDisplayName)
         defaults.removeObject(forKey: Keys.virtualDisplaySize)
+        defaults.removeObject(forKey: Keys.selectedEthernetInterface)
     }
 }

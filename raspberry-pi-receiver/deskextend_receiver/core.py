@@ -83,6 +83,7 @@ class VideoReceiver:
         self.usb_scan_interval = float(os.environ.get("DESKEXTEND_USB_SCAN_INTERVAL", "1"))
         self.transport_lock = threading.Lock()
         self.active_transport = None
+        self.ethernet_interface = self.detect_ethernet_interface()
         self.refresh_usb_devices()
 
     def try_claim_transport(self, transport_name):
@@ -886,15 +887,59 @@ class VideoReceiver:
                 break
 
     def bind_socket(self):
+        return self.bind_socket_for_mode(ethernet_only=False)
+
+    def detect_ethernet_interface(self):
+        preferred = os.environ.get("DESKEXTEND_ETH_INTERFACE", "").strip()
+        if preferred:
+            sys_path = f"/sys/class/net/{preferred}"
+            if os.path.isdir(sys_path):
+                return preferred
+
+        candidates = []
+        try:
+            for iface in os.listdir("/sys/class/net"):
+                if iface == "lo" or iface.startswith("wl"):
+                    continue
+                iface_path = f"/sys/class/net/{iface}"
+                if not os.path.isdir(iface_path):
+                    continue
+                if os.path.exists(f"{iface_path}/wireless"):
+                    continue
+                candidates.append(iface)
+        except Exception:
+            return None
+
+        priority = ("eth", "enx", "en")
+        for prefix in priority:
+            for iface in candidates:
+                if iface.startswith(prefix):
+                    return iface
+        return candidates[0] if candidates else None
+
+    def bind_socket_for_mode(self, ethernet_only=False):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x10)
+
+            if ethernet_only and self.ethernet_interface and hasattr(socket, "SO_BINDTODEVICE"):
+                self.sock.setsockopt(
+                    socket.SOL_SOCKET,
+                    socket.SO_BINDTODEVICE,
+                    self.ethernet_interface.encode() + b"\0"
+                )
+
             self.sock.bind((self.host, self.port))
             self.sock.listen(1)
             self.sock.settimeout(5.0)
-            logger.info(f"[{self.device_name}] Listening on {self.host}:{self.port}")
+            if ethernet_only:
+                iface = self.ethernet_interface or "auto"
+                logger.info(f"[{self.device_name}] Listening on Ethernet {iface} {self.host}:{self.port}")
+            else:
+                logger.info(f"[{self.device_name}] Listening on {self.host}:{self.port}")
             return True
         except Exception as e:
             logger.error(f"Socket bind failed: {e}")
@@ -1137,7 +1182,7 @@ class VideoReceiver:
     def run_hybrid(self):
         self.running = True
 
-        logger.info("Starting hybrid mode (USB priority with network fallback)")
+        logger.info("Starting hybrid mode (USB priority with Ethernet fallback)")
         retry_delay = 1.0
         max_retry_delay = 15.0
         usb_scan_delay = 1.0
@@ -1230,10 +1275,11 @@ class VideoReceiver:
                         finally:
                             self.release_transport("USB")
 
-                logger.info(f"[{self.device_name}] Listening on network {self.host}:{self.port}")
-                if not self.bind_socket():
+                logger.info(f"[{self.device_name}] Listening on Ethernet fallback {self.host}:{self.port}")
+                if not self.bind_socket_for_mode(ethernet_only=True):
                     time.sleep(retry_delay)
                     retry_delay = min(max_retry_delay, retry_delay * 1.5)
+                    continue
 
                 logger.info(f"[{self.device_name}] Waiting for network connection...")
                 self.sock.settimeout(2.0)
@@ -1286,7 +1332,7 @@ class VideoReceiver:
 
                 except socket.timeout:
                     if self.usb_device:
-                        logger.info("No network connection, retrying USB...")
+                        logger.info("No Ethernet connection, retrying USB...")
 
             except Exception as e:
                 if self.running:
@@ -1304,6 +1350,8 @@ class VideoReceiver:
 
         if self.mode == "usb":
             self.run_usb()
+        elif self.mode == "ethernet":
+            self.run_ethernet()
         elif self.mode == "hybrid":
             self.run_hybrid()
         elif self.mode == "all":
@@ -1328,7 +1376,7 @@ class VideoReceiver:
     def run_network(self):
         self.running = True
 
-        if not self.bind_socket():
+        if not self.bind_socket_for_mode(ethernet_only=False):
             return
 
         logger.info("Waiting for network connection...")
@@ -1393,6 +1441,75 @@ class VideoReceiver:
             except Exception as e:
                 if self.running:
                     logger.error(f"Connection error: {e}")
+                    self.show_chromium_kiosk()
+                    time.sleep(1)
+
+    def run_ethernet(self):
+        self.running = True
+
+        if not self.bind_socket_for_mode(ethernet_only=True):
+            return
+
+        logger.info("Waiting for Ethernet connection...")
+        self.show_chromium_kiosk()
+
+        while self.running:
+            try:
+                if not self.display_connected:
+                    time.sleep(1)
+                    continue
+
+                if self.is_transport_busy_for("Ethernet"):
+                    time.sleep(0.5)
+                    continue
+
+                conn, addr = self.sock.accept()
+                logger.info(f"[{self.device_name}] Ethernet connected from {addr}")
+
+                if not self.try_claim_transport("Ethernet"):
+                    conn.close()
+                    continue
+
+                try:
+                    self.schedule_hide_when_window_present(
+                        ["vaapisink", "autovideosink", "gst-launch-1.0"],
+                        appear_timeout=3.0,
+                        after_delay=5.0
+                    )
+
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2097152)
+
+                    if not self.start_decoder():
+                        conn.close()
+                        self.show_chromium_kiosk()
+                        continue
+
+                    self.frame_count = 0
+                    self.bytes_received = 0
+                    self.last_fps_time = time.time()
+
+                    self.process_stream(conn)
+                    conn.close()
+
+                    if self.decoder_process:
+                        self.decoder_process.terminate()
+                        try:
+                            self.decoder_process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            self.decoder_process.kill()
+                        self.decoder_process = None
+
+                    logger.info("Ethernet connection closed, waiting for next connection...")
+                    self.show_chromium_kiosk()
+                finally:
+                    self.release_transport("Ethernet")
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if self.running:
+                    logger.error(f"Ethernet connection error: {e}")
                     self.show_chromium_kiosk()
                     time.sleep(1)
 

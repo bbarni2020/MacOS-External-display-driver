@@ -50,11 +50,15 @@ class ConnectionManager: ObservableObject {
                     let host = ConfigurationManager.shared.networkHost
                     transport?.connectNetwork(host: host)
                     updateDiagnostic("Connecting via Network: \(host)")
+                case "ethernet":
+                    let host = ConfigurationManager.shared.networkHost
+                    transport?.connectEthernet(host: host)
+                    updateDiagnostic("Connecting via Ethernet: \(host)")
                 case "hybrid":
                     let usbPath = ConfigurationManager.shared.usbDevice
                     let host = ConfigurationManager.shared.networkHost
-                    transport?.connectHybrid(usbPath: usbPath, networkHost: host)
-                    updateDiagnostic("Connecting in hybrid mode - USB: \(usbPath), Network: \(host)")
+                    transport?.connectHybrid(usbPath: usbPath, ethernetHost: host)
+                    updateDiagnostic("Connecting in hybrid mode - USB: \(usbPath), Ethernet: \(host)")
                 default:
                     break
                 }

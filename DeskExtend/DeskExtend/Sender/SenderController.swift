@@ -48,12 +48,14 @@ class SenderController {
             transport.connectUSB(devicePath: request.usbDevice)
         case .network:
             transport.connectNetwork(host: request.host, port: UInt16(request.port))
+        case .ethernet:
+            transport.connectEthernet(host: request.host, port: UInt16(request.port))
         case .hybrid:
             if request.usbDevice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 appManager?.appendLog("Hybrid mode selected but no USB device path is configured")
                 return
             }
-            transport.connectHybrid(usbPath: request.usbDevice, networkHost: request.host, port: UInt16(request.port))
+            transport.connectHybrid(usbPath: request.usbDevice, ethernetHost: request.host, port: UInt16(request.port))
         }
         
         let encoder = VideoEncoder(config: request.config) { [weak self] data in
