@@ -88,11 +88,11 @@ class VideoReceiver:
         self.socket_rcvbuf = int(os.environ.get("DESKEXTEND_SOCKET_RCVBUF", str(16 * 1024 * 1024)))
         self.socket_chunk_size = int(os.environ.get("DESKEXTEND_SOCKET_CHUNK_SIZE", str(1024 * 1024)))
         self.stream_compact_threshold = int(os.environ.get("DESKEXTEND_STREAM_COMPACT_THRESHOLD", str(2 * 1024 * 1024)))
-        self.stream_drop_backlog_bytes = int(
-            os.environ.get("DESKEXTEND_STREAM_DROP_BACKLOG_BYTES", str(8 * 1024 * 1024))
-        )
-        self.dropped_frames = 0
-        self.last_drop_log_time = 0.0
+        self.stream_drop_backlog_bytes = int(os.environ.get("DESKEXTEND_STREAM_DROP_BACKLOG_BYTES", str(8 * 1024 * 1024)))
+        self.stream_keep_latest_frames = int(os.environ.get("DESKEXTEND_STREAM_KEEP_LATEST_FRAMES", "2"))
+        self.decoder_queue_buffers = int(os.environ.get("DESKEXTEND_DECODER_QUEUE_BUFFERS", "2"))
+        self.decoder_max_lateness_ns = int(os.environ.get("DESKEXTEND_DECODER_MAX_LATENESS_NS", "20000000"))
+        self.dropped_frames_for_latency = 0
         self.refresh_usb_devices()
 
     def try_claim_transport(self, transport_name):
@@ -766,8 +766,30 @@ class VideoReceiver:
     def detect_decoder_pipeline(self):
         pipelines = []
 
+        queue_buffers = max(1, self.decoder_queue_buffers)
+        queue_stage = [
+            "queue",
+            "leaky=downstream",
+            f"max-size-buffers={queue_buffers}",
+            "max-size-time=0",
+            "max-size-bytes=0"
+        ]
+        parse_stage = ["h264parse", "disable-passthrough=true", "config-interval=-1"]
+
         has_v4l2_sink = os.path.exists("/dev/video0") and os.access("/dev/video0", os.W_OK)
         screen_res = get_screen_resolution()
+
+        pipelines.append({
+            "name": "Hardware v4l2 + kmssink (low latency)",
+            "cmd": [
+                "gst-launch-1.0", "-e",
+                "fdsrc", "fd=0",
+                "!", *queue_stage,
+                "!", *parse_stage,
+                "!", "v4l2h264dec", "capture-io-mode=dmabuf",
+                "!", "kmssink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+            ]
+        })
 
         if has_vaapi_sink():
             pipelines.append({
@@ -775,10 +797,10 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                    "!", "h264parse",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
                     "!", "vaapih264dec",
-                    "!", "vaapisink", "fullscreen=yes", "sync=false"
+                    "!", "vaapisink", "fullscreen=yes", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
                 ]
             })
 
@@ -789,13 +811,13 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                    "!", "h264parse",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
                     "!", "v4l2h264dec", "capture-io-mode=mmap",
                     "!", "videoconvert",
                     "!", "videoscale",
                     "!", f"video/x-raw,width={width},height={height}",
-                    "!", "autovideosink", "sync=false"
+                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
                 ]
             })
         else:
@@ -804,11 +826,11 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                    "!", "h264parse",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
                     "!", "v4l2h264dec", "capture-io-mode=mmap",
                     "!", "videoconvert",
-                    "!", "autovideosink", "sync=false"
+                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
                 ]
             })
 
@@ -818,10 +840,10 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                    "!", "h264parse",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
                     "!", "v4l2h264dec",
-                    "!", "v4l2sink", "device=/dev/video0", "sync=false"
+                    "!", "v4l2sink", "device=/dev/video0", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
                 ]
             })
 
@@ -830,11 +852,11 @@ class VideoReceiver:
             "cmd": [
                 "gst-launch-1.0", "-e",
                 "fdsrc", "fd=0",
-                "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                "!", "h264parse",
+                "!", *queue_stage,
+                "!", *parse_stage,
                 "!", "v4l2h264dec",
                 "!", "videoconvert",
-                "!", "gtksink", "fullscreen=true", "sync=false"
+                "!", "gtksink", "fullscreen=true", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
             ]
         })
 
@@ -845,13 +867,13 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                    "!", "h264parse",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
                     "!", "avdec_h264", "max-threads=4",
                     "!", "videoconvert",
                     "!", "videoscale",
                     "!", f"video/x-raw,width={width},height={height}",
-                    "!", "autovideosink", "sync=false"
+                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
                 ]
             })
         else:
@@ -860,11 +882,11 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
-                    "!", "h264parse",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
                     "!", "avdec_h264", "max-threads=4",
                     "!", "videoconvert",
-                    "!", "autovideosink", "sync=false"
+                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
                 ]
             })
 
@@ -887,7 +909,7 @@ class VideoReceiver:
                 self.decoder_process = subprocess.Popen(
                     pipeline,
                     stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     env=env,
                     bufsize=0
@@ -1198,10 +1220,11 @@ class VideoReceiver:
             self.current_fps = self.frame_count / elapsed
             mbps = (self.bytes_received * 8) / (elapsed * 1_000_000)
             logger.info(
-                f"FPS: {self.current_fps:.1f} | Bitrate: {mbps:.1f} Mbps | Frames: {self.frame_count}"
+                f"FPS: {self.current_fps:.1f} | Bitrate: {mbps:.1f} Mbps | Frames: {self.frame_count} | DroppedForLatency: {self.dropped_frames_for_latency}"
             )
             self.frame_count = 0
             self.bytes_received = 0
+            self.dropped_frames_for_latency = 0
             self.last_fps_time = now
 
     def read_from_connection(self, conn, chunk_size=None, recv_buffer=None):
@@ -1266,6 +1289,12 @@ class VideoReceiver:
                     chunk_len = len(chunk)
                     self.bytes_received += chunk_len
 
+                    if self.stream_drop_backlog_bytes > 0:
+                        dropped_bytes, dropped_frames = self.drop_stale_buffer_frames(buffer, parse_offset)
+                        if dropped_bytes:
+                            parse_offset += dropped_bytes
+                            self.dropped_frames_for_latency += dropped_frames
+
                     while len(buffer) - parse_offset >= 4:
                         frame_size = struct.unpack_from(">I", buffer, parse_offset)[0]
 
@@ -1276,20 +1305,6 @@ class VideoReceiver:
                         frame_total = 4 + frame_size
                         if len(buffer) - parse_offset < frame_total:
                             break
-
-                        backlog_after_frame = len(buffer) - (parse_offset + frame_total)
-                        if backlog_after_frame > self.stream_drop_backlog_bytes:
-                            parse_offset += frame_total
-                            self.dropped_frames += 1
-                            now = time.time()
-                            if now - self.last_drop_log_time >= 1.0:
-                                logger.warning(
-                                    "Backlog %d bytes > %d, dropping frames to keep latency low",
-                                    backlog_after_frame,
-                                    self.stream_drop_backlog_bytes,
-                                )
-                                self.last_drop_log_time = now
-                            continue
 
                         frame_start = parse_offset + 4
                         frame_end = frame_start + frame_size
@@ -1336,6 +1351,35 @@ class VideoReceiver:
             self.mark_stream_disconnected(transport_name)
 
         return True
+
+    def drop_stale_buffer_frames(self, buffer, parse_offset):
+        available = len(buffer) - parse_offset
+        if available <= self.stream_drop_backlog_bytes:
+            return 0, 0
+
+        keep_frames = max(1, self.stream_keep_latest_frames)
+        cursor = parse_offset
+        frame_offsets = []
+
+        while len(buffer) - cursor >= 4:
+            frame_size = struct.unpack_from(">I", buffer, cursor)[0]
+            if frame_size > self.max_frame_size:
+                return 0, 0
+            frame_total = 4 + frame_size
+            if len(buffer) - cursor < frame_total:
+                break
+            frame_offsets.append(cursor)
+            cursor += frame_total
+
+        complete_frames = len(frame_offsets)
+        if complete_frames <= keep_frames:
+            return 0, 0
+
+        drop_count = complete_frames - keep_frames
+        new_offset = frame_offsets[drop_count]
+        if drop_count > 0:
+            logger.debug("Dropped %d stale buffered frames to reduce latency", drop_count)
+        return max(0, new_offset - parse_offset), drop_count
 
     def run_usb(self):
         self.running = True
