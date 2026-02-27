@@ -88,7 +88,7 @@ class VideoReceiver:
         self.socket_rcvbuf = int(os.environ.get("DESKEXTEND_SOCKET_RCVBUF", str(16 * 1024 * 1024)))
         self.socket_chunk_size = int(os.environ.get("DESKEXTEND_SOCKET_CHUNK_SIZE", str(1024 * 1024)))
         self.stream_compact_threshold = int(os.environ.get("DESKEXTEND_STREAM_COMPACT_THRESHOLD", str(2 * 1024 * 1024)))
-        self.stream_drop_backlog_bytes = int(os.environ.get("DESKEXTEND_STREAM_DROP_BACKLOG_BYTES", str(8 * 1024 * 1024)))
+        self.stream_drop_backlog_bytes = int(os.environ.get("DESKEXTEND_STREAM_DROP_BACKLOG_BYTES", "0"))
         self.stream_keep_latest_frames = int(os.environ.get("DESKEXTEND_STREAM_KEEP_LATEST_FRAMES", "2"))
         self.decoder_queue_buffers = int(os.environ.get("DESKEXTEND_DECODER_QUEUE_BUFFERS", "2"))
         self.decoder_max_lateness_ns = int(os.environ.get("DESKEXTEND_DECODER_MAX_LATENESS_NS", "20000000"))
@@ -1015,13 +1015,15 @@ class VideoReceiver:
         if mode_name not in ("network", "ethernet"):
             return True
 
-        strict = mode_name == "ethernet"
+        strict = mode_name == "ethernet" and os.environ.get("DESKEXTEND_ENFORCE_ETH_ONLY", "0") == "1"
 
         allowed_interfaces = self.get_mode_interfaces(mode_name)
         if not allowed_interfaces:
             if strict:
                 logger.warning("No allowed Ethernet interfaces detected; rejecting client %s", client_ip)
                 return False
+            if mode_name == "ethernet":
+                logger.warning("No Ethernet interfaces detected; accepting client %s in relaxed mode", client_ip)
             return True
         
         if scope_id != 0:
@@ -1035,6 +1037,9 @@ class VideoReceiver:
                                 elif strict:
                                     logger.warning("Rejected client %s on disallowed interface %s", client_ip, iface)
                                     return False
+                                elif mode_name == "ethernet":
+                                    logger.warning("Ethernet mode client %s arrived via %s; allowing in relaxed mode", client_ip, iface)
+                                    return True
                     except Exception:
                         pass
             except Exception:
@@ -1054,6 +1059,8 @@ class VideoReceiver:
                 if strict:
                     logger.warning("Route lookup failed for Ethernet client %s", client_ip)
                     return False
+                if mode_name == "ethernet":
+                    logger.warning("Route lookup failed for Ethernet client %s; allowing in relaxed mode", client_ip)
                 return True
 
             parts = result.stdout.strip().split()
@@ -1061,11 +1068,20 @@ class VideoReceiver:
                 index = parts.index("dev")
                 if index + 1 < len(parts):
                     dev = parts[index + 1]
-                    return dev in allowed_interfaces
+                    if dev in allowed_interfaces:
+                        return True
+                    if strict:
+                        logger.warning("Rejected ethernet-mode client %s routed via %s (allowed: %s)", client_ip, dev, ", ".join(allowed_interfaces))
+                        return False
+                    if mode_name == "ethernet":
+                        logger.warning("Ethernet mode client %s routed via %s (allowed: %s); allowing in relaxed mode", client_ip, dev, ", ".join(allowed_interfaces))
+                    return True
         except Exception:
             if strict:
                 logger.warning("Could not validate Ethernet client route for %s", client_ip)
                 return False
+            if mode_name == "ethernet":
+                logger.warning("Could not validate Ethernet client route for %s; allowing in relaxed mode", client_ip)
             return True
 
         return not strict
