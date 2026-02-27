@@ -767,6 +767,7 @@ class VideoReceiver:
         pipelines = []
 
         queue_buffers = max(1, self.decoder_queue_buffers)
+        enable_kms = os.environ.get("DESKEXTEND_ENABLE_KMSSINK", "0") == "1"
         queue_stage = [
             "queue",
             "leaky=downstream",
@@ -779,17 +780,18 @@ class VideoReceiver:
         has_v4l2_sink = os.path.exists("/dev/video0") and os.access("/dev/video0", os.W_OK)
         screen_res = get_screen_resolution()
 
-        pipelines.append({
-            "name": "Hardware v4l2 + kmssink (low latency)",
-            "cmd": [
-                "gst-launch-1.0", "-e",
-                "fdsrc", "fd=0",
-                "!", *queue_stage,
-                "!", *parse_stage,
-                "!", "v4l2h264dec", "capture-io-mode=dmabuf",
-                "!", "kmssink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
-            ]
-        })
+        if enable_kms:
+            pipelines.append({
+                "name": "Hardware v4l2 + kmssink (low latency)",
+                "cmd": [
+                    "gst-launch-1.0", "-e",
+                    "fdsrc", "fd=0",
+                    "!", *queue_stage,
+                    "!", *parse_stage,
+                    "!", "v4l2h264dec", "capture-io-mode=mmap",
+                    "!", "kmssink", "sync=false"
+                ]
+            })
 
         if has_vaapi_sink():
             pipelines.append({
@@ -800,7 +802,7 @@ class VideoReceiver:
                     "!", *queue_stage,
                     "!", *parse_stage,
                     "!", "vaapih264dec",
-                    "!", "vaapisink", "fullscreen=yes", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                    "!", "vaapisink", "fullscreen=yes", "sync=false"
                 ]
             })
 
@@ -817,7 +819,7 @@ class VideoReceiver:
                     "!", "videoconvert",
                     "!", "videoscale",
                     "!", f"video/x-raw,width={width},height={height}",
-                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                    "!", "autovideosink", "sync=false"
                 ]
             })
         else:
@@ -830,7 +832,7 @@ class VideoReceiver:
                     "!", *parse_stage,
                     "!", "v4l2h264dec", "capture-io-mode=mmap",
                     "!", "videoconvert",
-                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                    "!", "autovideosink", "sync=false"
                 ]
             })
 
@@ -843,7 +845,7 @@ class VideoReceiver:
                     "!", *queue_stage,
                     "!", *parse_stage,
                     "!", "v4l2h264dec",
-                    "!", "v4l2sink", "device=/dev/video0", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                    "!", "v4l2sink", "device=/dev/video0", "sync=false"
                 ]
             })
 
@@ -856,7 +858,7 @@ class VideoReceiver:
                 "!", *parse_stage,
                 "!", "v4l2h264dec",
                 "!", "videoconvert",
-                "!", "gtksink", "fullscreen=true", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                "!", "gtksink", "fullscreen=true", "sync=false"
             ]
         })
 
@@ -873,7 +875,7 @@ class VideoReceiver:
                     "!", "videoconvert",
                     "!", "videoscale",
                     "!", f"video/x-raw,width={width},height={height}",
-                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                    "!", "autovideosink", "sync=false"
                 ]
             })
         else:
@@ -886,7 +888,7 @@ class VideoReceiver:
                     "!", *parse_stage,
                     "!", "avdec_h264", "max-threads=4",
                     "!", "videoconvert",
-                    "!", "autovideosink", "sync=false", "qos=true", f"max-lateness={self.decoder_max_lateness_ns}"
+                    "!", "autovideosink", "sync=false"
                 ]
             })
 
