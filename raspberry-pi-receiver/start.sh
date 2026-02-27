@@ -88,4 +88,4 @@ if [ -z "$XAUTHORITY" ] && [ -f "/home/pi/.Xauthority" ]; then
 fi
 
 . "$DEST/venv/bin/activate"
-env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME" --mode "$MODE"
+env DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" DESKEXTEND_SOCKET_RCVBUF=33554432 DESKEXTEND_SOCKET_CHUNK_SIZE=1048576 DESKEXTEND_STREAM_DROP_BACKLOG_BYTES=8388608 "$DEST/venv/bin/python" "$DEST/receiver.py" --name "$DISPLAY_NAME" --mode "$MODE"

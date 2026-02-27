@@ -88,6 +88,11 @@ class VideoReceiver:
         self.socket_rcvbuf = int(os.environ.get("DESKEXTEND_SOCKET_RCVBUF", str(16 * 1024 * 1024)))
         self.socket_chunk_size = int(os.environ.get("DESKEXTEND_SOCKET_CHUNK_SIZE", str(1024 * 1024)))
         self.stream_compact_threshold = int(os.environ.get("DESKEXTEND_STREAM_COMPACT_THRESHOLD", str(2 * 1024 * 1024)))
+        self.stream_drop_backlog_bytes = int(
+            os.environ.get("DESKEXTEND_STREAM_DROP_BACKLOG_BYTES", str(8 * 1024 * 1024))
+        )
+        self.dropped_frames = 0
+        self.last_drop_log_time = 0.0
         self.refresh_usb_devices()
 
     def try_claim_transport(self, transport_name):
@@ -770,7 +775,7 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=3", "max-size-time=0", "max-size-bytes=0",
+                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                     "!", "h264parse",
                     "!", "vaapih264dec",
                     "!", "vaapisink", "fullscreen=yes", "sync=false"
@@ -784,7 +789,7 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=3", "max-size-time=0", "max-size-bytes=0",
+                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                     "!", "h264parse",
                     "!", "v4l2h264dec", "capture-io-mode=mmap",
                     "!", "videoconvert",
@@ -799,7 +804,7 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=3", "max-size-time=0", "max-size-bytes=0",
+                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                     "!", "h264parse",
                     "!", "v4l2h264dec", "capture-io-mode=mmap",
                     "!", "videoconvert",
@@ -813,7 +818,7 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0",
+                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                     "!", "h264parse",
                     "!", "v4l2h264dec",
                     "!", "v4l2sink", "device=/dev/video0", "sync=false"
@@ -825,7 +830,7 @@ class VideoReceiver:
             "cmd": [
                 "gst-launch-1.0", "-e",
                 "fdsrc", "fd=0",
-                "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0",
+                "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                 "!", "h264parse",
                 "!", "v4l2h264dec",
                 "!", "videoconvert",
@@ -840,7 +845,7 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=4", "max-size-time=0", "max-size-bytes=0",
+                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                     "!", "h264parse",
                     "!", "avdec_h264", "max-threads=4",
                     "!", "videoconvert",
@@ -855,7 +860,7 @@ class VideoReceiver:
                 "cmd": [
                     "gst-launch-1.0", "-e",
                     "fdsrc", "fd=0",
-                    "!", "queue", "max-size-buffers=4", "max-size-time=0", "max-size-bytes=0",
+                    "!", "queue", "max-size-buffers=2", "max-size-time=0", "max-size-bytes=0", "leaky=downstream",
                     "!", "h264parse",
                     "!", "avdec_h264", "max-threads=4",
                     "!", "videoconvert",
@@ -1271,6 +1276,20 @@ class VideoReceiver:
                         frame_total = 4 + frame_size
                         if len(buffer) - parse_offset < frame_total:
                             break
+
+                        backlog_after_frame = len(buffer) - (parse_offset + frame_total)
+                        if backlog_after_frame > self.stream_drop_backlog_bytes:
+                            parse_offset += frame_total
+                            self.dropped_frames += 1
+                            now = time.time()
+                            if now - self.last_drop_log_time >= 1.0:
+                                logger.warning(
+                                    "Backlog %d bytes > %d, dropping frames to keep latency low",
+                                    backlog_after_frame,
+                                    self.stream_drop_backlog_bytes,
+                                )
+                                self.last_drop_log_time = now
+                            continue
 
                         frame_start = parse_offset + 4
                         frame_end = frame_start + frame_size
